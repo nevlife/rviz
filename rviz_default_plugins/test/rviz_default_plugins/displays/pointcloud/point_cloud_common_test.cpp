@@ -36,6 +36,7 @@
 
 #include "rviz_common/display.hpp"
 #include "rviz_common/properties/enum_property.hpp"
+#include "rviz_common/properties/status_property.hpp"
 #include "rviz_rendering/custom_parameter_indices.hpp"
 
 #include "rviz_default_plugins/displays/pointcloud/point_cloud_common.hpp"
@@ -270,6 +271,58 @@ TEST_F(PointCloudCommonTestFixture, styles_without_gpu_support_move_the_clouds_t
   ASSERT_THAT(point_cloud->getPoints(), SizeIs(2u));
   EXPECT_THAT(point_cloud->getPoints()[0].position, Vector3Eq(Ogre::Vector3(1, 2, 3)));
   EXPECT_THAT(point_cloud->getRenderables(), Not(IsEmpty()));
+}
+
+TEST_F(PointCloudCommonTestFixture, size_field_scales_gpu_points_over_the_field_range) {
+  if (!rviz_rendering::PointCloud::supportsGpuPoints(
+      rviz_rendering::PointCloud::RM_FLAT_SQUARES))
+  {
+    GTEST_SKIP() << "render system cannot draw raw point buffers";
+  }
+  point_cloud_common_->initialize(
+    context_.get(), scene_manager_->getRootSceneNode()->createChildSceneNode());
+  mockValidTransform();
+  parent_display_->findProperty("Color Transformer")->setValue("FlatColor");
+  auto size_field = parent_display_->findProperty("Size Field");
+  size_field->setValue("intensity");
+  size_field->subProp("Min Scale")->setValue(0.5f);
+  size_field->subProp("Max Scale")->setValue(2.0f);
+
+  point_cloud_common_->addMessage(
+    createPointCloud2WithIntensity({{1, 2, 3, 2.0f}, {4, 5, 6, 6.0f}, {7, 8, 9, 4.0f}}));
+  point_cloud_common_->update(0, 0);
+
+  auto point_cloud = rviz_default_plugins::findOnePointCloud(scene_manager_->getRootSceneNode());
+  ASSERT_TRUE(point_cloud->usesGpuPoints());
+  auto renderable = point_cloud->getRenderables()[0];
+  EXPECT_THAT(
+    renderable->getCustomParameter(RVIZ_RENDERING_SIZE_FIELD_PARAMETER),
+    Eq(Ogre::Vector4(1.0f, 0.0f, 0.5f, 2.0f)));
+  EXPECT_THAT(
+    renderable->getCustomParameter(RVIZ_RENDERING_SIZE_RANGE_PARAMETER),
+    Eq(Ogre::Vector4(2.0f, 4.0f, 0.0f, 0.0f)));
+  EXPECT_THAT(size_field->subProp("Min Value")->getValue().toFloat(), Eq(2.0f));
+  EXPECT_THAT(size_field->subProp("Max Value")->getValue().toFloat(), Eq(6.0f));
+}
+
+TEST_F(PointCloudCommonTestFixture, size_field_warns_when_the_cloud_is_drawn_on_the_cpu) {
+  point_cloud_common_->initialize(
+    context_.get(), scene_manager_->getRootSceneNode()->createChildSceneNode());
+  mockValidTransform();
+  parent_display_->findProperty("Style")->setValue("Boxes");
+  parent_display_->findProperty("Size Field")->setValue("intensity");
+
+  point_cloud_common_->addMessage(
+    createPointCloud2WithIntensity({{1, 2, 3, 2.0f}, {4, 5, 6, 6.0f}}));
+  point_cloud_common_->update(0, 0);
+  QCoreApplication::sendPostedEvents();
+  // The status list is the first child; its name carries the level.
+  auto status = dynamic_cast<rviz_common::properties::StatusProperty *>(
+    parent_display_->childAt(0)->subProp("Size Field"));
+  ASSERT_THAT(status, NotNull());
+  EXPECT_THAT(status->getLevel(), Eq(rviz_common::properties::StatusProperty::Warn));
+  auto point_cloud = rviz_default_plugins::findOnePointCloud(scene_manager_->getRootSceneNode());
+  EXPECT_FALSE(point_cloud->usesGpuPoints());
 }
 
 int main(int argc, char ** argv)

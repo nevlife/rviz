@@ -31,6 +31,8 @@
 #define RVIZ_DEFAULT_PLUGINS__DISPLAYS__POINTCLOUD__POINT_CLOUD_HELPERS_HPP_
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -125,6 +127,92 @@ inline T valueFromCloud(
   }
 
   return ret;
+}
+
+template<typename T, typename F>
+inline void forEachValueAs(const uint8_t * data, uint32_t point_step, uint32_t num_points, F && f)
+{
+  for (uint32_t i = 0; i < num_points; ++i, data += point_step) {
+    T value;
+    std::memcpy(&value, data, sizeof(T));
+    f(i, static_cast<float>(value));
+  }
+}
+
+// Same conversion as valueFromCloud<float>, with the type switch outside the point loop.
+template<typename F>
+inline void forEachValue(
+  const sensor_msgs::msg::PointCloud2 & cloud, uint32_t offset, uint8_t type,
+  uint32_t point_step, uint32_t num_points, F && f)
+{
+  const uint8_t * data = cloud.data.data() + offset;
+  switch (type) {
+    case sensor_msgs::msg::PointField::INT8:
+    case sensor_msgs::msg::PointField::UINT8:
+      forEachValueAs<uint8_t>(data, point_step, num_points, f);
+      break;
+    case sensor_msgs::msg::PointField::INT16:
+    case sensor_msgs::msg::PointField::UINT16:
+      forEachValueAs<uint16_t>(data, point_step, num_points, f);
+      break;
+    case sensor_msgs::msg::PointField::INT32:
+    case sensor_msgs::msg::PointField::UINT32:
+      forEachValueAs<uint32_t>(data, point_step, num_points, f);
+      break;
+    case sensor_msgs::msg::PointField::FLOAT32:
+      forEachValueAs<float>(data, point_step, num_points, f);
+      break;
+    case sensor_msgs::msg::PointField::FLOAT64:
+      forEachValueAs<double>(data, point_step, num_points, f);
+      break;
+    default:
+      for (uint32_t i = 0; i < num_points; ++i) {
+        f(i, 0.0f);
+      }
+      break;
+  }
+}
+
+/// Min and max of field index, clamped to +-999999, over the points with finite x, y and z
+/// (over all points when skip_invalid_positions is false).
+inline void fieldRange(
+  const sensor_msgs::msg::PointCloud2 & cloud, int32_t index, bool skip_invalid_positions,
+  float & min_value, float & max_value)
+{
+  const uint32_t point_step = cloud.point_step;
+  const uint8_t * data = cloud.data.data();
+  uint32_t xyz[3] = {0, 0, 0};
+  if (skip_invalid_positions) {
+    const char * names[3] = {"x", "y", "z"};
+    for (uint32_t k = 0; k < 3; ++k) {
+      for (auto field = cloud.fields.rbegin(); field != cloud.fields.rend(); ++field) {
+        if (field->name == names[k]) {
+          xyz[k] = field->offset;
+        }
+      }
+    }
+  }
+  min_value = 999999.0f;
+  max_value = -999999.0f;
+  forEachValue(
+    cloud, cloud.fields[index].offset, cloud.fields[index].datatype, point_step,
+    cloud.width * cloud.height,
+    [&](uint32_t i, float val) {
+      if (skip_invalid_positions) {
+        const uint8_t * point = data + static_cast<size_t>(i) * point_step;
+        for (uint32_t o : xyz) {
+          float v;
+          std::memcpy(&v, point + o, sizeof(v));
+          if (!std::isfinite(v)) {
+            return;
+          }
+        }
+      }
+      min_value = std::min(val, min_value);
+      max_value = std::max(val, max_value);
+    });
+  min_value = std::max(-999999.0f, min_value);
+  max_value = std::min(999999.0f, max_value);
 }
 
 inline void getRainbowColor(float value, Ogre::ColourValue & color)

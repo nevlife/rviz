@@ -76,6 +76,7 @@ namespace properties
 {
 
 class BoolProperty;
+class EditableEnumProperty;
 class EnumProperty;
 class FloatProperty;
 
@@ -123,6 +124,7 @@ struct RVIZ_DEFAULT_PLUGINS_PUBLIC CloudInfo
   bool gpu_ = false;
   rviz_rendering::PointCloud::GpuLayout gpu_layout_;
   rviz_rendering::PointCloud::GpuColor gpu_color_;
+  rviz_rendering::PointCloud::GpuSize gpu_size_;
 
   Ogre::Quaternion orientation_;
   Ogre::Vector3 position_;
@@ -173,6 +175,12 @@ public:
   rviz_common::properties::EnumProperty * color_transformer_property_;
   rviz_common::properties::EnumProperty * style_property_;
   rviz_common::properties::FloatProperty * decay_time_property_;
+  rviz_common::properties::EditableEnumProperty * size_field_property_;
+  rviz_common::properties::FloatProperty * size_min_scale_property_;
+  rviz_common::properties::FloatProperty * size_max_scale_property_;
+  rviz_common::properties::BoolProperty * size_auto_bounds_property_;
+  rviz_common::properties::FloatProperty * size_min_value_property_;
+  rviz_common::properties::FloatProperty * size_max_value_property_;
 
   void setAutoSize(bool auto_size);
 
@@ -184,6 +192,7 @@ private Q_SLOTS:
   void updateStyle();
   void updateBillboardSize();
   void updateAlpha();
+  void updateSizeField();
   void updateXyzTransformer();
   void updateColorTransformer();
   void setXyzTransformerOptions(rviz_common::properties::EnumProperty * prop);
@@ -202,6 +211,8 @@ private:
     const PointCloudTransformerPtr & xyz_trans, const PointCloudTransformerPtr & color_trans,
     rviz_rendering::PointCloud::GpuLayout & layout);
   void drawCloud(const CloudInfoPtr & cloud_info);
+  rviz_rendering::PointCloud::GpuSize gpuSize(
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud, bool gpu);
   void updateStatus();
 
   PointCloudTransformerPtr getXYZTransformer(
@@ -267,6 +278,7 @@ private:
   bool new_xyz_transformer_;
   bool new_color_transformer_;
   bool needs_retransform_;
+  V_string size_fields_;
 
   std::unique_ptr<PointCloudTransformerFactory> transformer_factory_;
 

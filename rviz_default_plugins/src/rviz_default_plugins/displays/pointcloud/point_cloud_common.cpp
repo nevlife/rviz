@@ -29,6 +29,7 @@
 
 #include "rviz_default_plugins/displays/pointcloud/point_cloud_common.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <set>
@@ -46,6 +47,8 @@
 #include "rviz_default_plugins/displays/pointcloud/transformers/xyz_pc_transformer.hpp"
 #include "rviz_common/display.hpp"
 #include "rviz_common/display_context.hpp"
+#include "rviz_common/properties/bool_property.hpp"
+#include "rviz_common/properties/editable_enum_property.hpp"
 #include "rviz_common/properties/enum_property.hpp"
 #include "rviz_common/properties/float_property.hpp"
 #include "rviz_common/properties/vector_property.hpp"
@@ -154,6 +157,31 @@ PointCloudCommon::PointCloudCommon(rviz_common::Display * display)
     display_, SLOT(queueRender()));
   decay_time_property_->setMin(0);
 
+  size_field_property_ = new rviz_common::properties::EditableEnumProperty(
+    "Size Field", "",
+    "Field that scales the size of each point; empty gives all points the same size. "
+    "Applies when the cloud is drawn on the GPU (Points, Squares, Flat Squares, Spheres).",
+    display_, SLOT(updateSizeField()), this);
+  size_min_scale_property_ = new rviz_common::properties::FloatProperty(
+    "Min Scale", 0.1f, "Size factor of the points at Min Value.",
+    size_field_property_, SLOT(causeRetransform()), this);
+  size_min_scale_property_->setMin(0);
+  size_max_scale_property_ = new rviz_common::properties::FloatProperty(
+    "Max Scale", 1.0f, "Size factor of the points at Max Value.",
+    size_field_property_, SLOT(causeRetransform()), this);
+  size_max_scale_property_->setMin(0);
+  size_auto_bounds_property_ = new rviz_common::properties::BoolProperty(
+    "Autocompute Value Bounds", true,
+    "Whether Min Value and Max Value follow the field range of each cloud.",
+    size_field_property_, SLOT(updateSizeField()), this);
+  size_min_value_property_ = new rviz_common::properties::FloatProperty(
+    "Min Value", 0.0f, "Field value drawn at Min Scale.",
+    size_field_property_, SLOT(causeRetransform()), this);
+  size_max_value_property_ = new rviz_common::properties::FloatProperty(
+    "Max Value", 1.0f, "Field value drawn at Max Scale.",
+    size_field_property_, SLOT(causeRetransform()), this);
+  updateSizeField();
+
   xyz_transformer_property_ = new rviz_common::properties::EnumProperty(
     "Position Transformer", "",
     "Set the transformer to use to set the position of the points.",
@@ -243,6 +271,18 @@ void PointCloudCommon::updateAlpha()
     bool per_point_alpha = findChannelIndex(cloud_info->message_, "rgba") != -1;
     cloud_info->cloud_->setAlpha(alpha_property_->getFloat(), per_point_alpha);
   }
+}
+
+void PointCloudCommon::updateSizeField()
+{
+  const bool enabled = !size_field_property_->getStdString().empty();
+  const bool manual = enabled && !size_auto_bounds_property_->getBool();
+  size_min_scale_property_->setHidden(!enabled);
+  size_max_scale_property_->setHidden(!enabled);
+  size_auto_bounds_property_->setHidden(!enabled);
+  size_min_value_property_->setHidden(!manual);
+  size_max_value_property_->setHidden(!manual);
+  causeRetransform();
 }
 
 void PointCloudCommon::updateSelectable()
@@ -616,12 +656,95 @@ void PointCloudCommon::drawCloud(const CloudInfoPtr & cloud_info)
   }
   if (cloud_info->cloud_->usesGpuPoints()) {
     cloud_info->cloud_->setGpuColor(cloud_info->gpu_color_);
+    cloud_info->cloud_->setGpuSize(cloud_info->gpu_size_);
     return;
   }
   const auto & message = cloud_info->message_;
   cloud_info->cloud_->setGpuPoints(
     std::shared_ptr<const uint8_t>(message, message->data.data()),
-    message->width * message->height, cloud_info->gpu_layout_, cloud_info->gpu_color_);
+    message->width * message->height, cloud_info->gpu_layout_, cloud_info->gpu_color_,
+    cloud_info->gpu_size_);
+}
+
+rviz_rendering::PointCloud::GpuSize PointCloudCommon::gpuSize(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud, bool gpu)
+{
+  V_string fields;
+  for (const auto & field : cloud->fields) {
+    if (!field.name.empty()) {
+      fields.push_back(field.name);
+    }
+  }
+  std::sort(fields.begin(), fields.end());
+  if (fields != size_fields_) {
+    size_field_property_->clearOptions();
+    size_field_property_->addOptionStd("");
+    for (const auto & field : fields) {
+      size_field_property_->addOptionStd(field);
+    }
+    size_fields_ = fields;
+  }
+
+  using GpuColor = rviz_rendering::PointCloud::GpuColor;
+  rviz_rendering::PointCloud::GpuSize size;
+  const std::string name = size_field_property_->getStdString();
+  if (name.empty()) {
+    display_->deleteStatusStd("Size Field");
+    return size;
+  }
+  const int32_t index = findChannelIndex(cloud, name);
+  if (index == -1) {
+    display_->setStatusStd(
+      rviz_common::properties::StatusProperty::Warn, "Size Field", "No field '" + name + "'");
+    return size;
+  }
+  switch (cloud->fields[index].datatype) {
+    case sensor_msgs::msg::PointField::FLOAT32:
+      size.field_type = GpuColor::FLOAT32;
+      break;
+    case sensor_msgs::msg::PointField::INT8:
+    case sensor_msgs::msg::PointField::UINT8:
+      size.field_type = GpuColor::UINT8;
+      break;
+    case sensor_msgs::msg::PointField::INT16:
+    case sensor_msgs::msg::PointField::UINT16:
+      size.field_type = GpuColor::UINT16;
+      break;
+    case sensor_msgs::msg::PointField::INT32:
+    case sensor_msgs::msg::PointField::UINT32:
+      size.field_type = GpuColor::UINT32;
+      break;
+    default:
+      display_->setStatusStd(
+        rviz_common::properties::StatusProperty::Warn, "Size Field",
+        "Field '" + name + "' is float64, which the GPU renderer does not read");
+      return size;
+  }
+  if (!gpu) {
+    display_->setStatusStd(
+      rviz_common::properties::StatusProperty::Warn, "Size Field",
+      "Not applied: this cloud is not drawn on the GPU");
+    return size;
+  }
+  display_->deleteStatusStd("Size Field");
+
+  float min_value;
+  float max_value;
+  if (size_auto_bounds_property_->getBool()) {
+    fieldRange(*cloud, index, !cloud->is_dense, min_value, max_value);
+    size_min_value_property_->setFloat(min_value);
+    size_max_value_property_->setFloat(max_value);
+  } else {
+    min_value = size_min_value_property_->getFloat();
+    max_value = size_max_value_property_->getFloat();
+  }
+  size.enabled = true;
+  size.field_offset = cloud->fields[index].offset;
+  size.min_value = min_value;
+  size.value_range = max_value - min_value;
+  size.min_scale = size_min_scale_property_->getFloat();
+  size.max_scale = size_max_scale_property_->getFloat();
+  return size;
 }
 
 bool PointCloudCommon::gpuPathFor(
@@ -731,6 +854,7 @@ bool PointCloudCommon::transformPoints(
     gpuPathFor(cloud_info->message_, xyz_trans, color_trans, cloud_info->gpu_layout_) &&
     dynamic_cast<GpuColorTransformer *>(color_trans.get())->gpuColor(
     cloud_info->message_, transform, cloud_info->gpu_color_);
+  cloud_info->gpu_size_ = gpuSize(cloud_info->message_, cloud_info->gpu_);
   if (cloud_info->gpu_) {
     return true;
   }

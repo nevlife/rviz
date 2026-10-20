@@ -512,6 +512,55 @@ TEST_F(GpuPointCloudTestFixture, addPoints_after_gpu_points_goes_back_to_cpu_buf
   EXPECT_THAT(point_cloud->getPoints()[0].position, Vector3Eq(Ogre::Vector3(1, 2, 3)));
 }
 
+TEST_F(GpuPointCloudTestFixture, size_field_binds_the_field_and_sets_the_scale_parameters) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setRenderMode(rviz_rendering::PointCloud::RM_FLAT_SQUARES);
+  rviz_rendering::PointCloud::GpuSize size;
+  size.enabled = true;
+  size.field_offset = offsetof(GpuRecord, intensity);
+  size.min_value = 1.0f;
+  size.value_range = 3.0f;
+  size.min_scale = 0.25f;
+  size.max_scale = 2.0f;
+
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), {}, size);
+
+  auto renderable = point_cloud->getRenderables()[0];
+  auto declaration = renderable->getRenderOperation()->vertexData->vertexDeclaration;
+  auto element = declaration->findElementBySemantic(Ogre::VES_TEXTURE_COORDINATES, 5);
+  ASSERT_THAT(element, NotNull());
+  EXPECT_THAT(element->getOffset(), Eq(offsetof(GpuRecord, intensity)));
+  EXPECT_THAT(element->getType(), Eq(Ogre::VET_FLOAT1));
+  EXPECT_THAT(
+    renderable->getCustomParameter(RVIZ_RENDERING_SIZE_FIELD_PARAMETER),
+    Eq(Ogre::Vector4(1.0f, 0.0f, 0.25f, 2.0f)));
+  EXPECT_THAT(
+    renderable->getCustomParameter(RVIZ_RENDERING_SIZE_RANGE_PARAMETER),
+    Eq(Ogre::Vector4(1.0f, 3.0f, 0.0f, 0.0f)));
+}
+
+TEST_F(GpuPointCloudTestFixture, disabling_the_size_field_unbinds_it) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  rviz_rendering::PointCloud::GpuSize size;
+  size.enabled = true;
+  size.field_type = rviz_rendering::PointCloud::GpuColor::UINT16;
+  size.field_offset = offsetof(GpuRecord, rgb);
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), {}, size);
+  auto declaration =
+    point_cloud->getRenderables()[0]->getRenderOperation()->vertexData->vertexDeclaration;
+  ASSERT_THAT(declaration->findElementBySemantic(Ogre::VES_TEXTURE_COORDINATES, 5), NotNull());
+  EXPECT_THAT(
+    declaration->findElementBySemantic(Ogre::VES_TEXTURE_COORDINATES, 5)->getType(),
+    Eq(Ogre::VET_SHORT2));
+
+  point_cloud->setGpuSize({});
+
+  EXPECT_THAT(declaration->findElementBySemantic(Ogre::VES_TEXTURE_COORDINATES, 5), IsNull());
+  EXPECT_THAT(
+    point_cloud->getRenderables()[0]->getCustomParameter(RVIZ_RENDERING_SIZE_FIELD_PARAMETER).x,
+    Eq(0.0f));
+}
+
 TEST_F(PointCloudTestFixture, addPoints_by_value_takes_the_points) {
   auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
   std::vector<rviz_rendering::PointCloud::Point> points = squareCenteredAtZero;

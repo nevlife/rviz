@@ -6,6 +6,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_point.vert glsl
   default_params {
     param_named_auto worldviewproj_matrix worldviewproj_matrix
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
     param_named_auto color_mode custom 7
     param_named_auto color_range custom 8
     param_named_auto color_a custom 9
@@ -21,6 +23,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_point.vert(exact) glsl
   default_params {
     param_named_auto worldviewproj_matrix worldviewproj_matrix
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
     param_named_auto color_mode custom 7
     param_named_auto color_range custom 8
     param_named_auto color_a custom 9
@@ -37,6 +41,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_point.vert(with_depth) glsl
     param_named_auto worldviewproj_matrix worldviewproj_matrix
     param_named_auto worldview_matrix worldview_matrix
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
     param_named_auto color_mode custom 7
     param_named_auto color_range custom 8
     param_named_auto color_a custom 9
@@ -52,6 +58,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_point.vert(pick) glsl
   default_params {
     param_named_auto worldviewproj_matrix worldviewproj_matrix
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
   }
 }
 
@@ -62,6 +70,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_point.vert(pick_index) glsl
   default_params {
     param_named_auto worldviewproj_matrix worldviewproj_matrix
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
   }
 }
 
@@ -74,6 +84,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_billboard.vert glsl
     param_named_auto camera_pos camera_position_object_space
     param_named_auto auto_size custom 6
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
     param_named_auto color_mode custom 7
     param_named_auto color_range custom 8
     param_named_auto color_a custom 9
@@ -91,6 +103,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_billboard.vert(exact) glsl
     param_named_auto camera_pos camera_position_object_space
     param_named_auto auto_size custom 6
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
     param_named_auto color_mode custom 7
     param_named_auto color_range custom 8
     param_named_auto color_a custom 9
@@ -109,6 +123,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_billboard.vert(with_depth) glsl
     param_named_auto camera_pos camera_position_object_space
     param_named_auto auto_size custom 6
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
     param_named_auto color_mode custom 7
     param_named_auto color_range custom 8
     param_named_auto color_a custom 9
@@ -126,6 +142,8 @@ vertex_program rviz/glsl130/point_cloud_gpu_billboard.vert(pick) glsl
     param_named_auto camera_pos camera_position_object_space
     param_named_auto auto_size custom 6
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
   }
 }
 
@@ -138,5 +156,7 @@ vertex_program rviz/glsl130/point_cloud_gpu_billboard.vert(pick_index) glsl
     param_named_auto camera_pos camera_position_object_space
     param_named_auto auto_size custom 6
     param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
   }
 }

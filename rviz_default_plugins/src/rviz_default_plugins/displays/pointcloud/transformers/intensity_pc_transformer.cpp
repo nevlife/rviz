@@ -37,55 +37,6 @@
 namespace rviz_default_plugins
 {
 
-namespace
-{
-
-template<typename T, typename F>
-void forEachValueAs(const uint8_t * data, uint32_t point_step, uint32_t num_points, F && f)
-{
-  for (uint32_t i = 0; i < num_points; ++i, data += point_step) {
-    T value;
-    std::memcpy(&value, data, sizeof(T));
-    f(i, static_cast<float>(value));
-  }
-}
-
-// Same conversion as valueFromCloud<float>, with the type switch outside the point loop.
-template<typename F>
-void forEachValue(
-  const sensor_msgs::msg::PointCloud2 & cloud, uint32_t offset, uint8_t type,
-  uint32_t point_step, uint32_t num_points, F && f)
-{
-  const uint8_t * data = cloud.data.data() + offset;
-  switch (type) {
-    case sensor_msgs::msg::PointField::INT8:
-    case sensor_msgs::msg::PointField::UINT8:
-      forEachValueAs<uint8_t>(data, point_step, num_points, f);
-      break;
-    case sensor_msgs::msg::PointField::INT16:
-    case sensor_msgs::msg::PointField::UINT16:
-      forEachValueAs<uint16_t>(data, point_step, num_points, f);
-      break;
-    case sensor_msgs::msg::PointField::INT32:
-    case sensor_msgs::msg::PointField::UINT32:
-      forEachValueAs<uint32_t>(data, point_step, num_points, f);
-      break;
-    case sensor_msgs::msg::PointField::FLOAT32:
-      forEachValueAs<float>(data, point_step, num_points, f);
-      break;
-    case sensor_msgs::msg::PointField::FLOAT64:
-      forEachValueAs<double>(data, point_step, num_points, f);
-      break;
-    default:
-      for (uint32_t i = 0; i < num_points; ++i) {
-        f(i, 0.0f);
-      }
-      break;
-  }
-}
-
-}  // namespace
-
 uint8_t IntensityPCTransformer::supports(
   const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud)
 {
@@ -113,41 +64,10 @@ void IntensityPCTransformer::valueRange(
   const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud, int32_t index,
   bool skip_invalid_positions, float & min_intensity, float & diff_intensity)
 {
-  const uint32_t offset = cloud->fields[index].offset;
-  const uint8_t type = cloud->fields[index].datatype;
-  const uint32_t point_step = cloud->point_step;
-  const uint32_t num_points = cloud->width * cloud->height;
-
-  min_intensity = 999999.0f;
-  float max_intensity = -999999.0f;
+  float max_intensity;
   if (auto_compute_intensity_bounds_property_->getBool()) {
     // The CPU path gets clouds without invalid points; the GPU path skips them in the shader.
-    const uint8_t * data = cloud->data.data();
-    uint32_t xyz[3] = {0, 0, 0};
-    if (skip_invalid_positions) {
-      xyz[0] = cloud->fields[findChannelIndex(cloud, "x")].offset;
-      xyz[1] = cloud->fields[findChannelIndex(cloud, "y")].offset;
-      xyz[2] = cloud->fields[findChannelIndex(cloud, "z")].offset;
-    }
-    forEachValue(
-      *cloud, offset, type, point_step, num_points,
-      [&](uint32_t i, float val) {
-        if (skip_invalid_positions) {
-          const uint8_t * point = data + static_cast<size_t>(i) * point_step;
-          for (uint32_t o : xyz) {
-            float v;
-            std::memcpy(&v, point + o, sizeof(v));
-            if (!std::isfinite(v)) {
-              return;
-            }
-          }
-        }
-        min_intensity = std::min(val, min_intensity);
-        max_intensity = std::max(val, max_intensity);
-      });
-
-    min_intensity = std::max(-999999.0f, min_intensity);
-    max_intensity = std::min(999999.0f, max_intensity);
+    fieldRange(*cloud, index, skip_invalid_positions, min_intensity, max_intensity);
     min_intensity_property_->setFloat(min_intensity);
     max_intensity_property_->setFloat(max_intensity);
   } else {

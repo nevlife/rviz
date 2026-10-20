@@ -166,6 +166,19 @@ public:
     Ogre::ColourValue colorOf(const uint8_t * record, const Ogre::Vector3 & position) const;
   };
 
+  /// Scales each point's size by a field: size * (min_scale + t * (max_scale - min_scale)),
+  /// t = clamp((value - min_value) / value_range, 0, 1).
+  struct GpuSize
+  {
+    bool enabled = false;
+    GpuColor::FieldType field_type = GpuColor::FLOAT32;
+    uint32_t field_offset = 0;
+    float min_value = 0.0f;
+    float value_range = 1.0f;
+    float min_scale = 1.0f;
+    float max_scale = 1.0f;
+  };
+
   /// Byte layout of one point record, as in sensor_msgs/PointCloud2 (x, y, z are float32).
   struct GpuLayout
   {
@@ -192,8 +205,17 @@ public:
     std::shared_ptr<const uint8_t> data, uint32_t num_points,
     const GpuLayout & layout, const GpuColor & color);
 
+  /// Same as setGpuPoints(data, num_points, layout, color), with point sizes scaled by a field.
+  RVIZ_RENDERING_PUBLIC
+  void setGpuPoints(
+    std::shared_ptr<const uint8_t> data, uint32_t num_points,
+    const GpuLayout & layout, const GpuColor & color, const GpuSize & size);
+
   RVIZ_RENDERING_PUBLIC
   void setGpuColor(const GpuColor & color);
+
+  RVIZ_RENDERING_PUBLIC
+  void setGpuSize(const GpuSize & size);
 
   RVIZ_RENDERING_PUBLIC
   bool usesGpuPoints() const {return gpu_data_ != nullptr;}
@@ -366,6 +388,7 @@ private:
   Ogre::MaterialPtr getGpuMaterial(RenderMode mode);
   void rebuildGpuRenderable();
   void applyGpuColor();
+  void applyGpuSize();
   Ogre::HardwareVertexBufferSharedPtr gpuTemplate(RenderMode mode);
   std::vector<Point> decodeGpuPoints() const;
 
@@ -402,6 +425,7 @@ private:
   std::shared_ptr<const uint8_t> gpu_data_;
   GpuLayout gpu_layout_;
   GpuColor gpu_color_;
+  GpuSize gpu_size_;
   Ogre::HardwareVertexBufferSharedPtr gpu_buffer_;
   Ogre::HardwareVertexBufferSharedPtr gpu_quad_template_;
   Ogre::HardwareVertexBufferSharedPtr gpu_triangle_template_;

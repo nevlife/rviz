@@ -932,6 +932,13 @@ void PointCloud::setGpuPoints(
   std::shared_ptr<const uint8_t> data, uint32_t num_points,
   const GpuLayout & layout, const GpuColor & color)
 {
+  setGpuPoints(std::move(data), num_points, layout, color, GpuSize());
+}
+
+void PointCloud::setGpuPoints(
+  std::shared_ptr<const uint8_t> data, uint32_t num_points,
+  const GpuLayout & layout, const GpuColor & color, const GpuSize & size)
+{
   clear();
   V_Point().swap(points_);
   if (num_points == 0 || !data) {
@@ -980,6 +987,7 @@ void PointCloud::setGpuPoints(
   gpu_data_ = std::move(data);
   gpu_layout_ = layout;
   gpu_color_ = color;
+  gpu_size_ = size;
   point_count_ = num_points;
   rebuildGpuRenderable();
 }
@@ -1032,6 +1040,12 @@ void PointCloud::rebuildGpuRenderable()
       source, gpu_color_.field_offset, float_field ? Ogre::VET_FLOAT1 : Ogre::VET_SHORT2,
       Ogre::VES_TEXTURE_COORDINATES, 4);
   }
+  if (gpu_size_.enabled) {
+    declaration->addElement(
+      source, gpu_size_.field_offset,
+      gpu_size_.field_type == GpuColor::FLOAT32 ? Ogre::VET_FLOAT1 : Ogre::VET_SHORT2,
+      Ogre::VES_TEXTURE_COORDINATES, 5);
+  }
   gpu_buffer_->setIsInstanceData(instanced);
   if (instanced) {
     gpu_buffer_->setInstanceDataStepRate(1);
@@ -1045,9 +1059,36 @@ void PointCloud::rebuildGpuRenderable()
     gpu_renderable_->setMaterial(getGpuMaterial(render_mode_));
   }
   applyGpuColor();
+  applyGpuSize();
   if (getParentSceneNode()) {
     getParentSceneNode()->needUpdate();
   }
+}
+
+void PointCloud::setGpuSize(const GpuSize & size)
+{
+  if (!gpu_data_) {
+    return;
+  }
+  const bool same_attributes = size.enabled == gpu_size_.enabled &&
+    size.field_type == gpu_size_.field_type && size.field_offset == gpu_size_.field_offset;
+  gpu_size_ = size;
+  if (same_attributes) {
+    applyGpuSize();
+  } else {
+    rebuildGpuRenderable();
+  }
+}
+
+void PointCloud::applyGpuSize()
+{
+  const GpuSize & s = gpu_size_;
+  gpu_renderable_->setCustomParameter(
+    RVIZ_RENDERING_SIZE_FIELD_PARAMETER,
+    Ogre::Vector4(
+      s.enabled ? 1.0f : 0.0f, static_cast<float>(s.field_type), s.min_scale, s.max_scale));
+  gpu_renderable_->setCustomParameter(
+    RVIZ_RENDERING_SIZE_RANGE_PARAMETER, Ogre::Vector4(s.min_value, s.value_range, 0.0f, 0.0f));
 }
 
 void PointCloud::setGpuColor(const GpuColor & color)

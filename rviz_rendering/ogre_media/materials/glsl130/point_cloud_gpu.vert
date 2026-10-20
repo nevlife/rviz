@@ -19,6 +19,8 @@ uniform vec4 color_range;
 uniform vec4 color_a;
 uniform vec4 color_b;
 uniform vec4 color_axis;
+uniform vec4 size_field;
+uniform vec4 size_range;
 #ifdef BILLBOARD
 uniform vec4 camera_pos;
 uniform vec4 auto_size;
@@ -35,6 +37,7 @@ attribute vec4 uv1;
 attribute vec4 uv2;
 attribute vec4 uv3;
 attribute vec4 uv4;
+attribute vec4 uv5;
 
 // EXACT: IEEE division and no fused multiply-add, so computed colors match the CPU path bit for bit.
 float divide(float a, float b)
@@ -47,6 +50,27 @@ float divide(float a, float b)
 #else
   return a / b;
 #endif
+}
+
+// Integer fields arrive as two shorts (low, high).
+float fieldValue(vec4 field, int type)
+{
+  if (type == 0) {
+    return field.x;
+  } else if (type == 1) {
+    return float(int(field.x) & 0xFF);
+  } else if (type == 2) {
+    return float(int(field.x) & 0xFFFF);
+  }
+  return float(int(field.x) & 0xFFFF) + float(int(field.y) & 0xFFFF) * 65536.0;
+}
+
+float sizeScale()
+{
+  float v = fieldValue(uv5, int(size_field.y));
+  float t = size_range.y > 0.0 ? (v - size_range.x) / size_range.y : 0.0;
+  t = isnan(t) ? 0.0 : clamp(t, 0.0, 1.0);
+  return mix(size_field.z, size_field.w, t);
 }
 
 vec3 rainbow(float value)
@@ -88,16 +112,7 @@ vec4 pointColor(vec3 p)
   if (source == 2) {
     v = color_axis.x * p.x + color_axis.y * p.y + color_axis.z * p.z + color_axis.w;
   } else {
-    int type = int(color_mode.y);
-    if (type == 0) {
-      v = uv4.x;
-    } else if (type == 1) {
-      v = float(int(uv4.x) & 0xFF);
-    } else if (type == 2) {
-      v = float(int(uv4.x) & 0xFFFF);
-    } else {
-      v = float(int(uv4.x) & 0xFFFF) + float(int(uv4.y) & 0xFFFF) * 65536.0;
-    }
+    v = fieldValue(uv4, int(color_mode.y));
   }
   float t = divide(v - color_range.x, color_range.y);
   PRECISE vec3 c;
@@ -131,6 +146,9 @@ void main()
   up = normalize(up);
 
   vec4 size_factor = (1.0 - auto_size.x + (auto_size.x * p.z)) * size;
+  if (size_field.x > 0.5) {
+    size_factor *= sizeScale();
+  }
 
   vec4 s = vertex * (size_factor);
   vec3 r = s.xxx * right;
@@ -140,7 +158,11 @@ void main()
   gl_TexCoord[0] = vertex + vec4(0.5, 0.5, 0.0, 0.0);
 #else
   vec4 pos = vec4(p, vertex.w);
-  gl_PointSize = size.x;
+  float point_size = size.x;
+  if (size_field.x > 0.5) {
+    point_size *= sizeScale();
+  }
+  gl_PointSize = point_size;
 #endif
 
   if (any(isnan(p)) || any(isinf(p))) {
