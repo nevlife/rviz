@@ -43,6 +43,8 @@
 
 #include <cstring>
 
+#include <OgreHardwarePixelBuffer.h>  // NOLINT: cpplint cannot handle include order
+#include <OgrePixelFormat.h>  // NOLINT: cpplint cannot handle include order
 #include <OgreTextureManager.h>  // NOLINT: cpplint cannot handle include order
 
 #include "sensor_msgs/image_encodings.hpp"
@@ -58,6 +60,9 @@ namespace displays
 
 ROSImageTexture::ROSImageTexture()
 : new_image_(false),
+  texture_width_(0),
+  texture_height_(0),
+  texture_format_(Ogre::PF_UNKNOWN),
   width_(0),
   height_(0),
   median_frames_(5)
@@ -86,6 +91,7 @@ void ROSImageTexture::clear()
 
   texture_->unload();
   texture_->loadImage(empty_image_);
+  texture_format_ = Ogre::PF_UNKNOWN;
 
   new_image_ = false;
   current_image_.reset();
@@ -231,21 +237,36 @@ bool ROSImageTexture::update()
   ImageData image_data = setFormatAndNormalizeDataIfNecessary(
     image->encoding, data_ptr, data_size);
 
-  Ogre::Image ogre_image;
-  try {
-    Ogre::DataStreamPtr pixel_stream;
-    pixel_stream.reset(
-      new Ogre::MemoryDataStream(
-        const_cast<uint8_t *>(&image_data.data_ptr_[0]),
-        image_data.size_in_bytes_));
-    ogre_image.loadRawData(pixel_stream, width_, height_, 1, image_data.pixel_format_, 1, 0);
-  } catch (const Ogre::Exception & e) {
-    RVIZ_COMMON_LOG_ERROR_STREAM("Error loading image: " << e.what());
+  const size_t expected_size =
+    Ogre::PixelUtil::getMemorySize(width_, height_, 1, image_data.pixel_format_);
+  if (image_data.size_in_bytes_ != expected_size) {
+    RVIZ_COMMON_LOG_ERROR_STREAM(
+      "Error loading image: data size " << image_data.size_in_bytes_ <<
+        " does not match calculated image size " << expected_size);
     return false;
   }
 
-  texture_->unload();
-  texture_->loadImage(ogre_image);
+  auto pixels = const_cast<uint8_t *>(image_data.data_ptr_);
+  try {
+    if (width_ == texture_width_ && height_ == texture_height_ &&
+      image_data.pixel_format_ == texture_format_)
+    {
+      texture_->getBuffer()->blitFromMemory(
+        Ogre::PixelBox(width_, height_, 1, image_data.pixel_format_, pixels));
+    } else {
+      Ogre::Image ogre_image;
+      ogre_image.loadDynamicImage(pixels, width_, height_, 1, image_data.pixel_format_);
+      texture_->unload();
+      texture_->loadImage(ogre_image);
+      texture_width_ = width_;
+      texture_height_ = height_;
+      texture_format_ = image_data.pixel_format_;
+    }
+  } catch (const Ogre::Exception & e) {
+    RVIZ_COMMON_LOG_ERROR_STREAM("Error loading image: " << e.what());
+    texture_format_ = Ogre::PF_UNKNOWN;
+    return false;
+  }
 
   return true;
 }

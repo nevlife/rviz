@@ -139,6 +139,9 @@ private:
 
   Ogre::TexturePtr texture_;
   Ogre::Image empty_image_;
+  uint32_t texture_width_;
+  uint32_t texture_height_;
+  Ogre::PixelFormat texture_format_;
 
   uint32_t width_;
   uint32_t height_;
