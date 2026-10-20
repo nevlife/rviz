@@ -70,6 +70,10 @@ public:
     PointCloud * parent, int num_points, bool use_tex_coords,
     Ogre::RenderOperation::OperationType operationType);
 
+  /// Creates a renderable without vertex buffers; the owner fills declaration and bindings.
+  RVIZ_RENDERING_PUBLIC
+  explicit PointCloudRenderable(PointCloud * parent);
+
   RVIZ_RENDERING_PUBLIC
   virtual ~PointCloudRenderable();
 

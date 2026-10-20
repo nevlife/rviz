@@ -136,6 +136,68 @@ public:
     std::vector<Point>::iterator start_iterator,
     std::vector<Point>::iterator end_iterator);
 
+  /// Same as addPoints(begin, end), but takes the vector instead of copying it.
+  RVIZ_RENDERING_PUBLIC
+  void addPoints(std::vector<Point> && points);
+
+  /// How the vertex shader colors points uploaded with setGpuPoints().
+  struct GpuColor
+  {
+    enum Source : uint8_t {FLAT, FIELD, AXIS, RGB, RGBA};
+    enum FieldType : uint8_t {FLOAT32, UINT8, UINT16, UINT32};
+
+    Source source = FLAT;
+    FieldType field_type = FLOAT32;
+    uint32_t field_offset = 0;
+    /// FIELD and AXIS: t = (value - min_value) / value_range picks a rainbow color
+    /// (from 1 - t, or from 1 - (1 - t) when invert is set) or blends min_color into max_color.
+    float min_value = 0.0f;
+    float value_range = 1.0f;
+    bool rainbow = true;
+    bool invert = false;
+    /// AXIS: value = axis.xyz . position + axis.w
+    Ogre::Vector4 axis = Ogre::Vector4(0.0f, 0.0f, 1.0f, 0.0f);
+    /// FLAT draws min_color.
+    Ogre::ColourValue min_color = Ogre::ColourValue::White;
+    Ogre::ColourValue max_color = Ogre::ColourValue::White;
+
+    /// CPU reference of the shader color for one point record, before byte rounding.
+    RVIZ_RENDERING_PUBLIC
+    Ogre::ColourValue colorOf(const uint8_t * record, const Ogre::Vector3 & position) const;
+  };
+
+  /// Byte layout of one point record, as in sensor_msgs/PointCloud2 (x, y, z are float32).
+  struct GpuLayout
+  {
+    uint32_t point_step = 0;
+    uint32_t x_offset = 0;
+    uint32_t y_offset = 4;
+    uint32_t z_offset = 8;
+    /// When false, points with a non-finite coordinate are not drawn.
+    bool dense = true;
+  };
+
+  /// Whether setGpuPoints() can draw the given render mode with this render system.
+  RVIZ_RENDERING_PUBLIC
+  static bool supportsGpuPoints(RenderMode mode);
+
+  /**
+   * \brief Replaces the points with num_points raw records, uploaded as they are to the GPU.
+   *
+   * Positions and colors are decoded in the vertex shader. data is kept (not copied) for
+   * getPoints() until clear() or the next call.
+   */
+  RVIZ_RENDERING_PUBLIC
+  void setGpuPoints(
+    std::shared_ptr<const uint8_t> data, uint32_t num_points,
+    const GpuLayout & layout, const GpuColor & color);
+
+  RVIZ_RENDERING_PUBLIC
+  void setGpuColor(const GpuColor & color);
+
+  RVIZ_RENDERING_PUBLIC
+  bool usesGpuPoints() const {return gpu_data_ != nullptr;}
+
   /**
    * \brief Remove a number of points from this point cloud
    * \param num_points The number of points to pop
@@ -299,6 +361,14 @@ private:
     std::vector<PointCloud::Point>::iterator point, uint32_t current_point,
     uint32_t vertices_per_point, const float * vertices, bool write_vertex_offsets) const;
 
+  void fillHardwareBuffers(uint32_t first_point);
+  void createGpuMaterials();
+  Ogre::MaterialPtr getGpuMaterial(RenderMode mode);
+  void rebuildGpuRenderable();
+  void applyGpuColor();
+  Ogre::HardwareVertexBufferSharedPtr gpuTemplate(RenderMode mode);
+  std::vector<Point> decodeGpuPoints() const;
+
   Ogre::AxisAlignedBox bounding_box_;       ///< The bounding box of this point cloud
 
   typedef std::vector<Point> V_Point;
@@ -327,6 +397,19 @@ private:
 
   bool current_mode_supports_geometry_shader_;
   Ogre::ColourValue pick_color_;
+  bool per_point_alpha_ = false;
+
+  std::shared_ptr<const uint8_t> gpu_data_;
+  GpuLayout gpu_layout_;
+  GpuColor gpu_color_;
+  Ogre::HardwareVertexBufferSharedPtr gpu_buffer_;
+  Ogre::HardwareVertexBufferSharedPtr gpu_quad_template_;
+  Ogre::HardwareVertexBufferSharedPtr gpu_triangle_template_;
+  PointCloudRenderablePtr gpu_renderable_;
+  Ogre::MaterialPtr gpu_point_material_;
+  Ogre::MaterialPtr gpu_square_material_;
+  Ogre::MaterialPtr gpu_flat_square_material_;
+  Ogre::MaterialPtr gpu_sphere_material_;
 
   static Ogre::String sm_Type;              ///< The "renderable type" used by Ogre
 };

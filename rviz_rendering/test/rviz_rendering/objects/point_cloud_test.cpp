@@ -30,8 +30,13 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
+#include <cmath>
+#include <cstddef>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <regex>
+#include <utility>
 #include <vector>
 
 #include <QApplication>  // NOLINT
@@ -310,4 +315,213 @@ TEST_F(
   }
 
   ASSERT_THAT(point_cloud->getRenderables(), SizeIs(10));
+}
+
+namespace
+{
+
+struct GpuRecord
+{
+  float x, y, z;
+  float intensity;
+  uint32_t rgb;
+};
+
+std::shared_ptr<const uint8_t> gpuRecords(const std::vector<GpuRecord> & records)
+{
+  auto bytes = std::make_shared<std::vector<uint8_t>>(records.size() * sizeof(GpuRecord));
+  std::memcpy(bytes->data(), records.data(), bytes->size());
+  return std::shared_ptr<const uint8_t>(bytes, bytes->data());
+}
+
+rviz_rendering::PointCloud::GpuLayout gpuLayout()
+{
+  rviz_rendering::PointCloud::GpuLayout layout;
+  layout.point_step = sizeof(GpuRecord);
+  layout.x_offset = offsetof(GpuRecord, x);
+  layout.y_offset = offsetof(GpuRecord, y);
+  layout.z_offset = offsetof(GpuRecord, z);
+  return layout;
+}
+
+const std::vector<GpuRecord> gpu_square {
+  {1, 1, 0, 0.0f, 0x00ff0000},
+  {1, -1, 0, 1.0f, 0x0000ff00},
+  {-1, 1, 0, 2.0f, 0x000000ff},
+  {-1, -1, 0, 4.0f, 0x80402010}
+};
+
+}  // namespace
+
+class GpuPointCloudTestFixture : public PointCloudTestFixture
+{
+protected:
+  void SetUp() override
+  {
+    PointCloudTestFixture::SetUp();
+    if (!rviz_rendering::PointCloud::supportsGpuPoints(
+        rviz_rendering::PointCloud::RM_FLAT_SQUARES))
+    {
+      GTEST_SKIP() << "render system cannot draw raw point buffers";
+    }
+  }
+};
+
+TEST_F(GpuPointCloudTestFixture, setGpuPoints_draws_one_instanced_renderable) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setRenderMode(rviz_rendering::PointCloud::RM_FLAT_SQUARES);
+
+  point_cloud->setGpuPoints(
+    gpuRecords(gpu_square), 4, gpuLayout(), rviz_rendering::PointCloud::GpuColor());
+
+  ASSERT_TRUE(point_cloud->usesGpuPoints());
+  auto renderables = point_cloud->getRenderables();
+  ASSERT_THAT(renderables, SizeIs(1u));
+  auto op = renderables[0]->getRenderOperation();
+  EXPECT_THAT(op->numberOfInstances, Eq(4u));
+  EXPECT_THAT(op->vertexData->vertexCount, Eq(6u));
+  EXPECT_THAT(op->operationType, Eq(Ogre::RenderOperation::OT_TRIANGLE_LIST));
+  EXPECT_TRUE(op->vertexData->vertexBufferBinding->getBuffer(1)->isInstanceData());
+}
+
+TEST_F(GpuPointCloudTestFixture, points_mode_draws_one_vertex_per_point_without_instancing) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setRenderMode(rviz_rendering::PointCloud::RM_POINTS);
+
+  point_cloud->setGpuPoints(
+    gpuRecords(gpu_square), 4, gpuLayout(), rviz_rendering::PointCloud::GpuColor());
+
+  auto op = point_cloud->getRenderables()[0]->getRenderOperation();
+  EXPECT_THAT(op->vertexData->vertexCount, Eq(4u));
+  EXPECT_THAT(op->numberOfInstances, Eq(1u));
+  EXPECT_THAT(op->operationType, Eq(Ogre::RenderOperation::OT_POINT_LIST));
+  EXPECT_FALSE(op->vertexData->vertexBufferBinding->getBuffer(0)->isInstanceData());
+}
+
+TEST_F(GpuPointCloudTestFixture, bounding_box_skips_points_with_non_finite_coordinates) {
+  auto records = gpu_square;
+  records.push_back({std::nanf(""), 100, 100, 0, 0});
+  records.push_back({100, std::numeric_limits<float>::infinity(), 100, 0, 0});
+  auto layout = gpuLayout();
+  layout.dense = false;
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+
+  point_cloud->setGpuPoints(gpuRecords(records), 6, layout, {});
+
+  EXPECT_THAT(
+    point_cloud->getBoundingBox(),
+    AllOf(HasMinimum(Ogre::Vector3(-1, -1, 0)), HasMaximum(Ogre::Vector3(1, 1, 0))));
+}
+
+TEST_F(GpuPointCloudTestFixture, getPoints_decodes_positions_and_shader_colors) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  rviz_rendering::PointCloud::GpuColor color;
+  color.source = rviz_rendering::PointCloud::GpuColor::FIELD;
+  color.field_offset = offsetof(GpuRecord, intensity);
+  color.min_value = 0.0f;
+  color.value_range = 4.0f;
+  color.rainbow = false;
+  color.min_color = Ogre::ColourValue(0, 0, 0);
+  color.max_color = Ogre::ColourValue(1, 0.5f, 0);
+
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), color);
+
+  auto points = point_cloud->getPoints();
+  ASSERT_THAT(points, SizeIs(4u));
+  EXPECT_THAT(points[1].position, Vector3Eq(Ogre::Vector3(1, -1, 0)));
+  EXPECT_THAT(points[2].color, Eq(Ogre::ColourValue(0.5f, 0.25f, 0.0f)));
+  EXPECT_THAT(points[3].color, Eq(Ogre::ColourValue(1.0f, 0.5f, 0.0f)));
+
+  color.source = rviz_rendering::PointCloud::GpuColor::RGBA;
+  color.field_offset = offsetof(GpuRecord, rgb);
+  point_cloud->setGpuColor(color);
+  points = point_cloud->getPoints();
+  EXPECT_THAT(points[0].color, Eq(Ogre::ColourValue(1, 0, 0, 0)));
+  EXPECT_THAT(
+    points[3].color,
+    Eq(Ogre::ColourValue(0x40 / 255.0f, 0x20 / 255.0f, 0x10 / 255.0f, 0x80 / 255.0f)));
+}
+
+TEST_F(GpuPointCloudTestFixture, setGpuColor_sets_the_shader_parameters) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), {});
+  rviz_rendering::PointCloud::GpuColor color;
+  color.source = rviz_rendering::PointCloud::GpuColor::AXIS;
+  color.axis = Ogre::Vector4(0, 0, 1, 2);
+  color.min_value = -3.0f;
+  color.value_range = 6.0f;
+  color.invert = true;
+
+  point_cloud->setGpuColor(color);
+
+  auto renderable = point_cloud->getRenderables()[0];
+  EXPECT_THAT(
+    renderable->getCustomParameter(RVIZ_RENDERING_COLOR_MODE_PARAMETER),
+    Vector4Eq(Ogre::Vector4(rviz_rendering::PointCloud::GpuColor::AXIS, 0, 1, 1)));
+  EXPECT_THAT(
+    renderable->getCustomParameter(RVIZ_RENDERING_COLOR_RANGE_PARAMETER),
+    Vector4Eq(Ogre::Vector4(-3, 6, 0, 0)));
+  EXPECT_THAT(
+    renderable->getCustomParameter(RVIZ_RENDERING_COLOR_AXIS_PARAMETER),
+    Vector4Eq(Ogre::Vector4(0, 0, 1, 2)));
+}
+
+TEST_F(GpuPointCloudTestFixture, flat_color_is_truncated_to_bytes_like_the_cpu_path) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  rviz_rendering::PointCloud::GpuColor color;
+  color.min_color = Ogre::ColourValue(0.5f, 0.999f, 0.0f);
+
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), color);
+
+  EXPECT_THAT(
+    point_cloud->getRenderables()[0]->getCustomParameter(RVIZ_RENDERING_COLOR_A_PARAMETER),
+    Vector4Eq(Ogre::Vector4(127 / 255.0f, 254 / 255.0f, 0, 1)));
+}
+
+TEST_F(GpuPointCloudTestFixture, render_mode_without_gpu_support_drops_the_gpu_points) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), {});
+
+  point_cloud->setRenderMode(rviz_rendering::PointCloud::RM_BOXES);
+
+  EXPECT_FALSE(point_cloud->usesGpuPoints());
+  EXPECT_THAT(point_cloud->getRenderables(), IsEmpty());
+}
+
+TEST_F(GpuPointCloudTestFixture, changing_render_mode_keeps_the_uploaded_points) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setRenderMode(rviz_rendering::PointCloud::RM_FLAT_SQUARES);
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), {});
+
+  point_cloud->setRenderMode(rviz_rendering::PointCloud::RM_SPHERES);
+
+  ASSERT_THAT(point_cloud->getRenderables(), SizeIs(1u));
+  auto op = point_cloud->getRenderables()[0]->getRenderOperation();
+  EXPECT_THAT(op->vertexData->vertexCount, Eq(3u));
+  EXPECT_THAT(op->numberOfInstances, Eq(4u));
+}
+
+TEST_F(GpuPointCloudTestFixture, addPoints_after_gpu_points_goes_back_to_cpu_buffers) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), {});
+
+  point_cloud->addPoints(singlePointArray.begin(), singlePointArray.end());
+
+  EXPECT_FALSE(point_cloud->usesGpuPoints());
+  ASSERT_THAT(point_cloud->getPoints(), SizeIs(1u));
+  EXPECT_THAT(point_cloud->getPoints()[0].position, Vector3Eq(Ogre::Vector3(1, 2, 3)));
+}
+
+TEST_F(PointCloudTestFixture, addPoints_by_value_takes_the_points) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  std::vector<rviz_rendering::PointCloud::Point> points = squareCenteredAtZero;
+
+  point_cloud->addPoints(std::move(points));
+  point_cloud->addPoints(std::vector<rviz_rendering::PointCloud::Point>(singlePointArray));
+
+  ASSERT_THAT(point_cloud->getPoints(), SizeIs(5u));
+  EXPECT_THAT(point_cloud->getPoints()[4].position, Vector3Eq(Ogre::Vector3(1, 2, 3)));
+  EXPECT_THAT(
+    point_cloud->getBoundingBox(),
+    AllOf(HasMinimum(Ogre::Vector3(-1, -1, 0)), HasMaximum(Ogre::Vector3(1, 2, 3))));
 }

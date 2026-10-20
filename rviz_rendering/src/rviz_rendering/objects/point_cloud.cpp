@@ -32,7 +32,12 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <memory>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #include <OgreSceneManager.h>
@@ -48,6 +53,8 @@
 #include <OgreSharedPtr.h>
 #include <OgreTechnique.h>
 #include <OgreCamera.h>
+#include <OgreRenderSystem.h>
+#include <OgreRenderSystemCapabilities.h>
 
 #include "rviz_rendering/custom_parameter_indices.hpp"
 #include "rviz_rendering/logging.hpp"
@@ -182,6 +189,38 @@ float * PointCloud::getVertices()
   }
 }
 
+static const char * gpuMaterialName(PointCloud::RenderMode mode)
+{
+  switch (mode) {
+    case PointCloud::RM_POINTS:
+      return "rviz/PointCloudGpuPoint";
+    case PointCloud::RM_SQUARES:
+      return "rviz/PointCloudGpuSquare";
+    case PointCloud::RM_FLAT_SQUARES:
+      return "rviz/PointCloudGpuFlatSquare";
+    case PointCloud::RM_SPHERES:
+      return "rviz/PointCloudGpuSphere";
+    default:
+      return nullptr;
+  }
+}
+
+Ogre::MaterialPtr PointCloud::getGpuMaterial(RenderMode mode)
+{
+  switch (mode) {
+    case RM_POINTS:
+      return gpu_point_material_;
+    case RM_SQUARES:
+      return gpu_square_material_;
+    case RM_FLAT_SQUARES:
+      return gpu_flat_square_material_;
+    case RM_SPHERES:
+      return gpu_sphere_material_;
+    default:
+      return Ogre::MaterialPtr();
+  }
+}
+
 Ogre::MaterialPtr PointCloud::getMaterialForRenderMode(RenderMode mode)
 {
   switch (mode) {
@@ -264,6 +303,15 @@ PointCloud::~PointCloud()
   removeMaterial(sphere_material_);
   removeMaterial(tile_material_);
   removeMaterial(box_material_);
+
+  for (auto material : {&gpu_point_material_, &gpu_square_material_, &gpu_flat_square_material_,
+      &gpu_sphere_material_})
+  {
+    if (*material) {
+      (*material)->unload();
+      removeMaterial(*material);
+    }
+  }
 }
 
 const Ogre::AxisAlignedBox & PointCloud::getBoundingBox() const
@@ -290,6 +338,7 @@ void PointCloud::clear()
 {
   point_count_ = 0;
   bounding_box_.setNull();
+  gpu_data_.reset();
 
   if (getParentSceneNode()) {
     for (auto const & renderable : renderables_) {
@@ -298,7 +347,11 @@ void PointCloud::clear()
     getParentSceneNode()->needUpdate();
   }
 
-  spare_renderables_.insert(spare_renderables_.end(), renderables_.begin(), renderables_.end());
+  for (auto const & renderable : renderables_) {
+    if (renderable != gpu_renderable_) {
+      spare_renderables_.push_back(renderable);
+    }
+  }
   renderables_.clear();
 }
 
@@ -310,6 +363,10 @@ void PointCloud::clearAndRemoveAllPoints()
 
 void PointCloud::regenerateAll()
 {
+  if (gpu_data_) {
+    rebuildGpuRenderable();
+    return;
+  }
   if (point_count_ == 0) {
     return;
   }
@@ -325,7 +382,10 @@ void PointCloud::regenerateAll()
 void PointCloud::setColorByIndex(bool set)
 {
   color_by_index_ = set;
-  regenerateAll();
+  // The Pick1 technique of the GPU materials always writes index colors.
+  if (!gpu_data_) {
+    regenerateAll();
+  }
 }
 
 void PointCloud::setHighlightColor(float r, float g, float b)
@@ -345,12 +405,16 @@ void PointCloud::setRenderMode(RenderMode mode)
   current_material_->load();
 
   if (changingGeometrySupportIsNecessary(current_material_)) {
-    renderables_.clear();
+    if (!gpu_data_) {
+      renderables_.clear();
+    }
     spare_renderables_.clear();
   }
 
-  for (auto & renderable : renderables_) {
-    renderable->setMaterial(current_material_);
+  if (!gpu_data_) {
+    for (auto & renderable : renderables_) {
+      renderable->setMaterial(current_material_);
+    }
   }
 
   regenerateAll();
@@ -436,21 +500,21 @@ void setReplace(const Ogre::MaterialPtr & mat)
 void PointCloud::setAlpha(float alpha, bool per_point_alpha)
 {
   alpha_ = alpha;
+  per_point_alpha_ = per_point_alpha;
 
-  if (alpha < rviz_rendering::unit_alpha_threshold || per_point_alpha) {
-    setAlphaBlending(point_material_);
-    setAlphaBlending(square_material_);
-    setAlphaBlending(flat_square_material_);
-    setAlphaBlending(sphere_material_);
-    setAlphaBlending(tile_material_);
-    setAlphaBlending(box_material_);
-  } else {
-    setReplace(point_material_);
-    setReplace(square_material_);
-    setReplace(flat_square_material_);
-    setReplace(sphere_material_);
-    setReplace(tile_material_);
-    setReplace(box_material_);
+  const bool blend = alpha < rviz_rendering::unit_alpha_threshold || per_point_alpha;
+  for (auto material : {&point_material_, &square_material_, &flat_square_material_,
+      &sphere_material_, &tile_material_, &box_material_, &gpu_point_material_,
+      &gpu_square_material_, &gpu_flat_square_material_, &gpu_sphere_material_})
+  {
+    if (!*material) {
+      continue;
+    }
+    if (blend) {
+      setAlphaBlending(*material);
+    } else {
+      setReplace(*material);
+    }
   }
 
   Ogre::Vector4 alpha4(alpha_, alpha_, alpha_, alpha_);
@@ -474,8 +538,36 @@ void PointCloud::addPoints(
   if (stop_iterator - start_iterator <= 0) {
     return;
   }
-  auto num_points = static_cast<uint32_t>(std::distance(start_iterator, stop_iterator));
+  if (gpu_data_) {
+    clear();
+  }
+  const auto first = static_cast<uint32_t>(points_.size());
   points_.insert(points_.cend(), start_iterator, stop_iterator);
+  fillHardwareBuffers(first);
+}
+
+void PointCloud::addPoints(std::vector<Point> && points)
+{
+  if (points.empty()) {
+    return;
+  }
+  if (gpu_data_) {
+    clear();
+  }
+  const auto first = static_cast<uint32_t>(points_.size());
+  if (points_.empty()) {
+    points_ = std::move(points);
+  } else {
+    points_.insert(points_.cend(), points.begin(), points.end());
+  }
+  fillHardwareBuffers(first);
+}
+
+void PointCloud::fillHardwareBuffers(uint32_t first)
+{
+  const auto start_iterator = points_.begin() + first;
+  const auto stop_iterator = points_.end();
+  auto num_points = static_cast<uint32_t>(std::distance(start_iterator, stop_iterator));
 
   RenderableInternals internals = createNewRenderable(num_points);
 
@@ -625,6 +717,7 @@ PointCloud::addPointToHardwareBuffer(
 
 void PointCloud::popPoints(uint32_t num_points)
 {
+  assert(!gpu_data_);
   assert(num_points <= point_count_);
 
   points_.erase(points_.begin(), points_.begin() + num_points);
@@ -645,6 +738,9 @@ void PointCloud::popPoints(uint32_t num_points)
 
 std::vector<PointCloud::Point> PointCloud::getPoints()
 {
+  if (gpu_data_) {
+    return decodeGpuPoints();
+  }
   return points_;
 }
 
@@ -744,7 +840,7 @@ PointCloudRenderablePtr PointCloud::reuseSpareRenderable(
 
 void PointCloud::initializeRenderable(const PointCloudRenderablePtr & rend)
 {
-  rend->setMaterial(current_material_);
+  rend->setMaterial(rend == gpu_renderable_ ? getGpuMaterial(render_mode_) : current_material_);
   Ogre::Vector4 alpha(alpha_, 0.0f, 0.0f, 0.0f);
   Ogre::Vector4 highlight(0.0f, 0.0f, 0.0f, 0.0f);
   Ogre::Vector4 pick_col(pick_color_.r, pick_color_.g, pick_color_.b, pick_color_.a);
@@ -754,7 +850,7 @@ void PointCloud::initializeRenderable(const PointCloudRenderablePtr & rend)
   rend->setCustomParameter(RVIZ_RENDERING_PICK_COLOR_PARAMETER, pick_col);
   rend->setCustomParameter(RVIZ_RENDERING_NORMAL_PARAMETER, Ogre::Vector4(common_direction_));
   rend->setCustomParameter(RVIZ_RENDERING_UP_PARAMETER, Ogre::Vector4(common_up_vector_));
-  if (getParentSceneNode()) {
+  if (getParentSceneNode() && !rend->isAttached()) {
     getParentSceneNode()->attachObject(rend.get());
   }
   renderables_.push_back(rend);
@@ -769,6 +865,314 @@ void PointCloud::visitRenderables(Ogre::Renderable::Visitor * visitor, bool debu
 {
   (void) visitor;
   (void) debugRenderables;
+}
+
+bool PointCloud::supportsGpuPoints(RenderMode mode)
+{
+  const char * name = gpuMaterialName(mode);
+  if (!name) {
+    return false;
+  }
+  if (mode != RM_POINTS) {
+    Ogre::RenderSystem * render_system = Ogre::Root::getSingleton().getRenderSystem();
+    if (!render_system || !render_system->getCapabilities() ||
+      !render_system->getCapabilities()->hasCapability(Ogre::RSC_VERTEX_BUFFER_INSTANCE_DATA))
+    {
+      return false;
+    }
+  }
+  Ogre::MaterialPtr material = Ogre::MaterialManager::getSingleton().getByName(name);
+  if (!material) {
+    return false;
+  }
+  material->load();
+  for (const char * technique_name : {"gpu_exact", "gpu"}) {
+    Ogre::Technique * technique = material->getTechnique(technique_name);
+    if (technique && technique->isSupported()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void PointCloud::createGpuMaterials()
+{
+  if (gpu_point_material_) {
+    return;
+  }
+  static int count = 0;
+  const std::string prefix = "PointCloudGpuMaterial" + std::to_string(count++);
+  auto & manager = Ogre::MaterialManager::getSingleton();
+  const std::pair<Ogre::MaterialPtr *, RenderMode> materials[] = {
+    {&gpu_point_material_, RM_POINTS}, {&gpu_square_material_, RM_SQUARES},
+    {&gpu_flat_square_material_, RM_FLAT_SQUARES}, {&gpu_sphere_material_, RM_SPHERES}};
+  for (const auto & entry : materials) {
+    *entry.first = manager.getByName(gpuMaterialName(entry.second))->clone(
+      prefix + std::to_string(entry.second));
+    (*entry.first)->load();
+  }
+  setAlpha(alpha_, per_point_alpha_);
+}
+
+Ogre::HardwareVertexBufferSharedPtr PointCloud::gpuTemplate(RenderMode mode)
+{
+  const bool sphere = mode == RM_SPHERES;
+  auto & buffer = sphere ? gpu_triangle_template_ : gpu_quad_template_;
+  if (!buffer) {
+    const float * vertices = sphere ? g_billboard_sphere_vertices : g_billboard_vertices;
+    const size_t count = sphere ? 3 : 6;
+    buffer = Ogre::HardwareBufferManager::getSingleton().createVertexBuffer(
+      3 * sizeof(float), count, Ogre::HardwareBuffer::HBU_STATIC_WRITE_ONLY);
+    buffer->writeData(0, count * 3 * sizeof(float), vertices, true);
+  }
+  return buffer;
+}
+
+void PointCloud::setGpuPoints(
+  std::shared_ptr<const uint8_t> data, uint32_t num_points,
+  const GpuLayout & layout, const GpuColor & color)
+{
+  clear();
+  V_Point().swap(points_);
+  if (num_points == 0 || !data) {
+    return;
+  }
+  createGpuMaterials();
+
+  // One spare record: 2-byte attribute pairs of the last point may read past its end.
+  const size_t capacity = static_cast<size_t>(num_points) + 1;
+  if (!gpu_buffer_ || gpu_buffer_->getVertexSize() != layout.point_step ||
+    gpu_buffer_->getNumVertices() < capacity || gpu_buffer_->getNumVertices() > 2 * capacity)
+  {
+    gpu_buffer_.reset();
+    gpu_buffer_ = Ogre::HardwareBufferManager::getSingleton().createVertexBuffer(
+      layout.point_step, capacity, Ogre::HardwareBuffer::HBU_STATIC_WRITE_ONLY);
+  }
+  // On NVIDIA, map and copy takes about a tenth of the GUI thread time of glBufferData.
+  const size_t bytes = static_cast<size_t>(num_points) * layout.point_step;
+  std::memcpy(gpu_buffer_->lock(0, bytes, Ogre::HardwareBuffer::HBL_DISCARD), data.get(), bytes);
+  gpu_buffer_->unlock();
+
+  float min[3] = {
+    std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
+    std::numeric_limits<float>::max()};
+  float max[3] = {-min[0], -min[1], -min[2]};
+  bool any = false;
+  const uint8_t * record = data.get();
+  for (uint32_t i = 0; i < num_points; ++i, record += layout.point_step) {
+    float p[3];
+    std::memcpy(&p[0], record + layout.x_offset, sizeof(float));
+    std::memcpy(&p[1], record + layout.y_offset, sizeof(float));
+    std::memcpy(&p[2], record + layout.z_offset, sizeof(float));
+    if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) {
+      continue;
+    }
+    for (int k = 0; k < 3; ++k) {
+      min[k] = std::min(min[k], p[k]);
+      max[k] = std::max(max[k], p[k]);
+    }
+    any = true;
+  }
+  if (any) {
+    bounding_box_.setExtents(min[0], min[1], min[2], max[0], max[1], max[2]);
+  }
+
+  gpu_data_ = std::move(data);
+  gpu_layout_ = layout;
+  gpu_color_ = color;
+  point_count_ = num_points;
+  rebuildGpuRenderable();
+}
+
+void PointCloud::rebuildGpuRenderable()
+{
+  if (!supportsGpuPoints(render_mode_)) {
+    clear();
+    return;
+  }
+  if (!gpu_renderable_) {
+    gpu_renderable_ = std::make_shared<PointCloudRenderable>(this);
+  }
+  Ogre::RenderOperation * op = gpu_renderable_->getRenderOperation();
+  Ogre::VertexDeclaration * declaration = op->vertexData->vertexDeclaration;
+  Ogre::VertexBufferBinding * binding = op->vertexData->vertexBufferBinding;
+  declaration->removeAllElements();
+  binding->unsetAllBindings();
+
+  const bool instanced = render_mode_ != RM_POINTS;
+  uint16_t source = 0;
+  if (instanced) {
+    Ogre::HardwareVertexBufferSharedPtr corners = gpuTemplate(render_mode_);
+    declaration->addElement(0, 0, Ogre::VET_FLOAT3, Ogre::VES_POSITION);
+    binding->setBinding(0, corners);
+    source = 1;
+    declaration->addElement(
+      source, gpu_layout_.x_offset, Ogre::VET_FLOAT1, Ogre::VES_TEXTURE_COORDINATES, 1);
+    op->operationType = Ogre::RenderOperation::OT_TRIANGLE_LIST;
+    op->vertexData->vertexCount = corners->getNumVertices();
+    op->numberOfInstances = point_count_;
+  } else {
+    declaration->addElement(0, gpu_layout_.x_offset, Ogre::VET_FLOAT1, Ogre::VES_POSITION);
+    op->operationType = Ogre::RenderOperation::OT_POINT_LIST;
+    op->vertexData->vertexCount = point_count_;
+    op->numberOfInstances = 1;
+  }
+  op->vertexData->vertexStart = 0;
+  declaration->addElement(
+    source, gpu_layout_.y_offset, Ogre::VET_FLOAT1, Ogre::VES_TEXTURE_COORDINATES, 2);
+  declaration->addElement(
+    source, gpu_layout_.z_offset, Ogre::VET_FLOAT1, Ogre::VES_TEXTURE_COORDINATES, 3);
+  const bool reads_field = gpu_color_.source == GpuColor::FIELD ||
+    gpu_color_.source == GpuColor::RGB || gpu_color_.source == GpuColor::RGBA;
+  if (reads_field) {
+    // Integer and color fields are read as two shorts and reassembled in the shader.
+    const bool float_field =
+      gpu_color_.source == GpuColor::FIELD && gpu_color_.field_type == GpuColor::FLOAT32;
+    declaration->addElement(
+      source, gpu_color_.field_offset, float_field ? Ogre::VET_FLOAT1 : Ogre::VET_SHORT2,
+      Ogre::VES_TEXTURE_COORDINATES, 4);
+  }
+  gpu_buffer_->setIsInstanceData(instanced);
+  if (instanced) {
+    gpu_buffer_->setInstanceDataStepRate(1);
+  }
+  binding->setBinding(source, gpu_buffer_);
+  gpu_renderable_->setBoundingBox(bounding_box_);
+
+  if (std::find(renderables_.begin(), renderables_.end(), gpu_renderable_) == renderables_.end()) {
+    initializeRenderable(gpu_renderable_);
+  } else {
+    gpu_renderable_->setMaterial(getGpuMaterial(render_mode_));
+  }
+  applyGpuColor();
+  if (getParentSceneNode()) {
+    getParentSceneNode()->needUpdate();
+  }
+}
+
+void PointCloud::setGpuColor(const GpuColor & color)
+{
+  if (!gpu_data_) {
+    return;
+  }
+  const bool same_attributes = color.source == gpu_color_.source &&
+    color.field_type == gpu_color_.field_type && color.field_offset == gpu_color_.field_offset;
+  gpu_color_ = color;
+  if (same_attributes) {
+    applyGpuColor();
+  } else {
+    rebuildGpuRenderable();
+  }
+}
+
+static float truncatedToByte(float value)
+{
+  return static_cast<float>(static_cast<uint8_t>(value * 255)) / 255.0f;
+}
+
+void PointCloud::applyGpuColor()
+{
+  const GpuColor & c = gpu_color_;
+  Ogre::Vector4 color_a(c.min_color.r, c.min_color.g, c.min_color.b, c.min_color.a);
+  if (c.source == GpuColor::FLAT) {
+    // The CPU path stores colors as bytes (Ogre::ColourValue::getAsBYTE truncates).
+    color_a = Ogre::Vector4(
+      truncatedToByte(c.min_color.r), truncatedToByte(c.min_color.g),
+      truncatedToByte(c.min_color.b), truncatedToByte(c.min_color.a));
+  }
+  gpu_renderable_->setCustomParameter(
+    RVIZ_RENDERING_COLOR_MODE_PARAMETER,
+    Ogre::Vector4(
+      static_cast<float>(c.source), static_cast<float>(c.field_type), c.rainbow ? 1.0f : 0.0f,
+      c.invert ? 1.0f : 0.0f));
+  gpu_renderable_->setCustomParameter(
+    RVIZ_RENDERING_COLOR_RANGE_PARAMETER, Ogre::Vector4(c.min_value, c.value_range, 0.0f, 0.0f));
+  gpu_renderable_->setCustomParameter(RVIZ_RENDERING_COLOR_A_PARAMETER, color_a);
+  gpu_renderable_->setCustomParameter(
+    RVIZ_RENDERING_COLOR_B_PARAMETER,
+    Ogre::Vector4(c.max_color.r, c.max_color.g, c.max_color.b, c.max_color.a));
+  gpu_renderable_->setCustomParameter(RVIZ_RENDERING_COLOR_AXIS_PARAMETER, c.axis);
+}
+
+static void rainbowColor(float value, Ogre::ColourValue & color)
+{
+  value = std::max(std::min(value, 1.0f), 0.0f);
+  float h = value * 5.0f + 1.0f;
+  int i = static_cast<int>(std::floor(h));
+  float f = h - static_cast<float>(i);
+  if (!(i & 1)) {
+    f = 1 - f;
+  }
+  float n = 1 - f;
+  if (i <= 1) {
+    color.r = n, color.g = 0, color.b = 1;
+  } else if (i == 2) {
+    color.r = 0, color.g = n, color.b = 1;
+  } else if (i == 3) {
+    color.r = 0, color.g = 1, color.b = n;
+  } else if (i == 4) {
+    color.r = n, color.g = 1, color.b = 0;
+  } else {
+    color.r = 1, color.g = n, color.b = 0;
+  }
+}
+
+Ogre::ColourValue PointCloud::GpuColor::colorOf(
+  const uint8_t * record, const Ogre::Vector3 & position) const
+{
+  Ogre::ColourValue color = Ogre::ColourValue::White;
+  const uint8_t * field = record + field_offset;
+  if (source == FLAT) {
+    return min_color;
+  }
+  if (source == RGB || source == RGBA) {
+    uint32_t rgb;
+    std::memcpy(&rgb, field, sizeof(rgb));
+    return Ogre::ColourValue(
+      ((rgb >> 16) & 0xff) / 255.0f, ((rgb >> 8) & 0xff) / 255.0f, (rgb & 0xff) / 255.0f,
+      source == RGBA ? (rgb >> 24) / 255.0f : 1.0f);
+  }
+  float value = 0.0f;
+  if (source == AXIS) {
+    value = axis.x * position.x + axis.y * position.y + axis.z * position.z + axis.w;
+  } else if (field_type == FLOAT32) {
+    std::memcpy(&value, field, sizeof(float));
+  } else if (field_type == UINT8) {
+    value = static_cast<float>(field[0]);
+  } else if (field_type == UINT16) {
+    uint16_t v;
+    std::memcpy(&v, field, sizeof(v));
+    value = static_cast<float>(v);
+  } else {
+    uint32_t v;
+    std::memcpy(&v, field, sizeof(v));
+    value = static_cast<float>(v);
+  }
+  const float t = (value - min_value) / value_range;
+  if (rainbow) {
+    const float value = 1.0f - t;
+    rainbowColor(invert ? 1.0f - value : value, color);
+  } else {
+    const float n = std::min(1.0f, std::max(0.0f, t));
+    color.r = max_color.r * n + min_color.r * (1.0f - n);
+    color.g = max_color.g * n + min_color.g * (1.0f - n);
+    color.b = max_color.b * n + min_color.b * (1.0f - n);
+  }
+  return color;
+}
+
+std::vector<PointCloud::Point> PointCloud::decodeGpuPoints() const
+{
+  std::vector<Point> points(point_count_);
+  const uint8_t * record = gpu_data_.get();
+  for (auto & point : points) {
+    std::memcpy(&point.position.x, record + gpu_layout_.x_offset, sizeof(float));
+    std::memcpy(&point.position.y, record + gpu_layout_.y_offset, sizeof(float));
+    std::memcpy(&point.position.z, record + gpu_layout_.z_offset, sizeof(float));
+    point.color = gpu_color_.colorOf(record, point.position);
+    record += gpu_layout_.point_step;
+  }
+  return points;
 }
 
 }  // namespace rviz_rendering

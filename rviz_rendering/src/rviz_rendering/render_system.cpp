@@ -368,6 +368,12 @@ RenderSystem::setupResources()
   if (getGlslVersion() >= 120) {
     Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
       rviz_path + "/ogre_media/materials/scripts120", "FileSystem", "rviz_rendering");
+    if (getGlslVersion() >= 130) {
+      Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
+        rviz_path + "/ogre_media/materials/glsl130", "FileSystem", "rviz_rendering");
+      Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
+        rviz_path + "/ogre_media/materials/scripts130", "FileSystem", "rviz_rendering");
+    }
   } else {
     std::string s =
       "Your graphics driver does not support OpenGL 2.1. "

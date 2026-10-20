@@ -1,0 +1,212 @@
+// Same passes as the PointCloud* materials, with vertex programs that read the raw point bytes.
+// gpu_exact needs GL_ARB_gpu_shader5; without it the plain gpu technique is used.
+
+material rviz/PointCloudGpuPoint
+{
+  technique gpu_exact
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      point_size_attenuation on
+      point_sprites on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_point.vert(exact) {}
+      fragment_program_ref rviz/glsl120/flat_color_circle.frag {}
+    }
+  }
+  technique gpu
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      point_size_attenuation on
+      point_sprites on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_point.vert {}
+      fragment_program_ref rviz/glsl120/flat_color_circle.frag {}
+    }
+  }
+  technique gpu_depth
+  {
+    scheme Depth
+    pass
+    {
+      point_size_attenuation on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_point.vert(with_depth) {}
+      fragment_program_ref rviz/glsl120/depth_circle.frag {}
+    }
+  }
+  technique gpu_selection_first_pass
+  {
+    scheme Pick
+    pass
+    {
+      point_size_attenuation on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_point.vert(pick) {}
+      fragment_program_ref rviz/glsl120/pickcolor_circle.frag {}
+    }
+  }
+  technique gpu_selection_second_pass
+  {
+    scheme Pick1
+    pass
+    {
+      point_size_attenuation on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_point.vert(pick_index) {}
+      fragment_program_ref rviz/glsl120/pass_color_circle.frag {}
+    }
+  }
+}
+
+material rviz/PointCloudGpuSquare
+{
+  technique gpu_exact
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(exact) {}
+      fragment_program_ref rviz/glsl120/smooth_square.frag {}
+    }
+  }
+  technique gpu
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert {}
+      fragment_program_ref rviz/glsl120/smooth_square.frag {}
+    }
+  }
+  technique gpu_depth
+  {
+    scheme Depth
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(with_depth) {}
+      fragment_program_ref rviz/glsl120/depth.frag {}
+    }
+  }
+  technique gpu_selection_first_pass
+  {
+    scheme Pick
+    pass
+    {
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(pick) {}
+      fragment_program_ref rviz/glsl120/pickcolor.frag {}
+    }
+  }
+  technique gpu_selection_second_pass
+  {
+    scheme Pick1
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(pick_index) {}
+      fragment_program_ref rviz/glsl120/pass_color.frag {}
+    }
+  }
+}
+
+material rviz/PointCloudGpuFlatSquare
+{
+  technique gpu_exact
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(exact) {}
+      fragment_program_ref rviz/glsl120/flat_color.frag {}
+    }
+  }
+  technique gpu
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert {}
+      fragment_program_ref rviz/glsl120/flat_color.frag {}
+    }
+  }
+  technique gpu_depth
+  {
+    scheme Depth
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(with_depth) {}
+      fragment_program_ref rviz/glsl120/depth.frag {}
+    }
+  }
+  technique gpu_selection_first_pass
+  {
+    scheme Pick
+    pass
+    {
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(pick) {}
+      fragment_program_ref rviz/glsl120/pickcolor.frag {}
+    }
+  }
+  technique gpu_selection_second_pass
+  {
+    scheme Pick1
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(pick_index) {}
+      fragment_program_ref rviz/glsl120/pass_color.frag {}
+    }
+  }
+}
+
+material rviz/PointCloudGpuSphere
+{
+  technique gpu_exact
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(exact) {}
+      fragment_program_ref rviz/glsl120/shaded_circle.frag {}
+    }
+  }
+  technique gpu
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert {}
+      fragment_program_ref rviz/glsl120/shaded_circle.frag {}
+    }
+  }
+  technique gpu_depth
+  {
+    scheme Depth
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(with_depth) {}
+      fragment_program_ref rviz/glsl120/depth_circle.frag {}
+    }
+  }
+  technique gpu_selection_first_pass
+  {
+    scheme Pick
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(pick) {}
+      fragment_program_ref rviz/glsl120/pickcolor_circle.frag {}
+    }
+  }
+  technique gpu_selection_second_pass
+  {
+    scheme Pick1
+    pass
+    {
+      alpha_rejection greater_equal 1
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_billboard.vert(pick_index) {}
+      fragment_program_ref rviz/glsl120/pass_color_circle.frag {}
+    }
+  }
+}

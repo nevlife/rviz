@@ -49,6 +49,12 @@ PointCloudRenderable::PointCloudRenderable(
   createAndBindBuffer(num_points);
 }
 
+PointCloudRenderable::PointCloudRenderable(PointCloud * parent)
+: parent_(parent)
+{
+  initializeRenderOperation(Ogre::RenderOperation::OT_POINT_LIST);
+}
+
 PointCloudRenderable::~PointCloudRenderable()
 {
   delete mRenderOp.vertexData;
