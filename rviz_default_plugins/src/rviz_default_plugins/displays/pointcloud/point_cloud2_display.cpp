@@ -73,8 +73,10 @@ void PointCloud2Display::processMessage(const sensor_msgs::msg::PointCloud2::Con
     return;
   }
 
+  // The GPU path skips non-finite points in the shader and keeps the message indices.
   point_cloud_common_->addMessage(
-    cloud->is_dense ? cloud : filterOutInvalidPoints(cloud));
+    cloud->is_dense || point_cloud_common_->drawsOnGpu(cloud) ?
+    cloud : filterOutInvalidPoints(cloud));
 }
 
 bool PointCloud2Display::hasXYZChannels(

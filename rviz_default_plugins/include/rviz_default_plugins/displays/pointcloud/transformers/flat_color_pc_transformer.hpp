@@ -43,7 +43,8 @@
 namespace rviz_default_plugins
 {
 
-class RVIZ_DEFAULT_PLUGINS_PUBLIC FlatColorPCTransformer : public PointCloudTransformer
+class RVIZ_DEFAULT_PLUGINS_PUBLIC FlatColorPCTransformer
+  : public PointCloudTransformer, public GpuColorTransformer
 {
   Q_OBJECT
 
@@ -55,6 +56,11 @@ public:
     uint32_t mask,
     const Ogre::Matrix4 & transform,
     rviz_default_plugins::V_PointCloudPoint & points_out) override;
+
+  bool gpuColor(
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+    const Ogre::Matrix4 & transform,
+    rviz_rendering::PointCloud::GpuColor & color) override;
 
   void createProperties(
     rviz_common::properties::Property * parent_property,

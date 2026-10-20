@@ -42,8 +42,8 @@
 namespace rviz_default_plugins
 {
 
-class RVIZ_DEFAULT_PLUGINS_PUBLIC RGB8PCTransformer : public
-  rviz_default_plugins::PointCloudTransformer
+class RVIZ_DEFAULT_PLUGINS_PUBLIC RGB8PCTransformer
+  : public PointCloudTransformer, public GpuColorTransformer
 {
 public:
   unsigned char supports(const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud) override;
@@ -53,6 +53,11 @@ public:
     unsigned int mask,
     const Ogre::Matrix4 & transform,
     rviz_default_plugins::V_PointCloudPoint & points_out) override;
+
+  bool gpuColor(
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+    const Ogre::Matrix4 & transform,
+    rviz_rendering::PointCloud::GpuColor & color) override;
 };
 
 }  // end namespace rviz_default_plugins

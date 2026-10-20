@@ -103,6 +103,9 @@ struct RVIZ_DEFAULT_PLUGINS_PUBLIC CloudInfo
   void setSelectable(
     bool selectable, float selection_box_size, rviz_common::DisplayContext * context);
 
+  /// Position of a point in the frame of message_, read from the message.
+  Ogre::Vector3 pointPosition(uint64_t index) const;
+
   rclcpp::Time receive_time_;
 
   Ogre::SceneManager * manager_;
@@ -113,7 +116,13 @@ struct RVIZ_DEFAULT_PLUGINS_PUBLIC CloudInfo
   std::shared_ptr<rviz_rendering::PointCloud> cloud_;
   PointCloudSelectionHandlerPtr selection_handler_;
 
+  /// Filled by the CPU path and moved into cloud_ when it is drawn.
   std::vector<rviz_rendering::PointCloud::Point> transformed_points_;
+
+  /// When set, cloud_ draws message_ on the GPU and transformed_points_ stays empty.
+  bool gpu_ = false;
+  rviz_rendering::PointCloud::GpuLayout gpu_layout_;
+  rviz_rendering::PointCloud::GpuColor gpu_color_;
 
   Ogre::Quaternion orientation_;
   Ogre::Vector3 position_;
@@ -146,6 +155,9 @@ public:
 
   void addMessage(sensor_msgs::msg::PointCloud::ConstSharedPtr cloud);
   void addMessage(sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud);
+
+  /// Whether cloud would be drawn on the GPU, which skips points with non-finite coordinates.
+  bool drawsOnGpu(const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud);
 
   rviz_common::Display * getDisplay() {return display_;}
 
@@ -185,6 +197,11 @@ private:
   bool transformPoints(
     const CloudInfoPtr & cloud_info, V_PointCloudPoint & cloud_points, bool update_transformers);
   void setProblematicPointsToInfinity(V_PointCloudPoint & cloud_points);
+  bool gpuPathFor(
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+    const PointCloudTransformerPtr & xyz_trans, const PointCloudTransformerPtr & color_trans,
+    rviz_rendering::PointCloud::GpuLayout & layout);
+  void drawCloud(const CloudInfoPtr & cloud_info);
   void updateStatus();
 
   PointCloudTransformerPtr getXYZTransformer(

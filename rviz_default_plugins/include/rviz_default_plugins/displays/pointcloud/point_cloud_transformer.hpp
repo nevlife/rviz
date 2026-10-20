@@ -147,6 +147,19 @@ protected:
   QString description_;
 };
 
+/// A color transformer whose colors the point cloud vertex shader can compute from the raw bytes.
+class RVIZ_DEFAULT_PLUGINS_PUBLIC GpuColorTransformer
+{
+public:
+  virtual ~GpuColorTransformer() = default;
+
+  /// Describes the colors transform() would give cloud; false when the shader cannot match them.
+  virtual bool gpuColor(
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+    const Ogre::Matrix4 & transform,
+    rviz_rendering::PointCloud::GpuColor & color) = 0;
+};
+
 }  // namespace rviz_default_plugins
 
 #endif  // RVIZ_DEFAULT_PLUGINS__DISPLAYS__POINTCLOUD__POINT_CLOUD_TRANSFORMER_HPP_

@@ -69,6 +69,18 @@ bool FlatColorPCTransformer::transform(
   return true;
 }
 
+bool FlatColorPCTransformer::gpuColor(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+  const Ogre::Matrix4 & transform,
+  rviz_rendering::PointCloud::GpuColor & color)
+{
+  (void) cloud;
+  (void) transform;
+  color.source = rviz_rendering::PointCloud::GpuColor::FLAT;
+  color.min_color = color_property_->getOgreColor();
+  return true;
+}
+
 void FlatColorPCTransformer::createProperties(
   rviz_common::properties::Property * parent_property,
   uint32_t mask,

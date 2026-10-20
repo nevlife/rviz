@@ -230,6 +230,48 @@ TEST_F(
   ASSERT_THAT(point_clouds.size(), Eq(0u));
 }
 
+TEST_F(PointCloudCommonTestFixture, clouds_with_a_shader_color_transformer_are_drawn_on_the_gpu) {
+  if (!rviz_rendering::PointCloud::supportsGpuPoints(
+      rviz_rendering::PointCloud::RM_FLAT_SQUARES))
+  {
+    GTEST_SKIP() << "render system cannot draw raw point buffers";
+  }
+  point_cloud_common_->initialize(
+    context_.get(), scene_manager_->getRootSceneNode()->createChildSceneNode());
+  mockValidTransform();
+  parent_display_->findProperty("Color Transformer")->setValue("FlatColor");
+  parent_display_->findProperty("Color")->setValue(QColor(0, 255, 0));
+  auto cloud = createPointCloud2WithPoints({{1, 2, 3}, {4, 5, 6}});
+
+  point_cloud_common_->addMessage(cloud);
+  point_cloud_common_->update(0, 0);
+  EXPECT_TRUE(point_cloud_common_->drawsOnGpu(cloud));
+
+  auto point_cloud = rviz_default_plugins::findOnePointCloud(scene_manager_->getRootSceneNode());
+  ASSERT_TRUE(point_cloud->usesGpuPoints());
+  ASSERT_THAT(point_cloud->getPoints(), SizeIs(2u));
+  EXPECT_THAT(point_cloud->getPoints()[1].position, Vector3Eq(Ogre::Vector3(4, 5, 6)));
+  EXPECT_THAT(point_cloud->getPoints()[1].color, ColourValueEq(Ogre::ColourValue(0, 1, 0)));
+}
+
+TEST_F(PointCloudCommonTestFixture, styles_without_gpu_support_move_the_clouds_to_the_cpu_path) {
+  point_cloud_common_->initialize(
+    context_.get(), scene_manager_->getRootSceneNode()->createChildSceneNode());
+  mockValidTransform();
+  parent_display_->findProperty("Color Transformer")->setValue("FlatColor");
+  point_cloud_common_->addMessage(createPointCloud2WithPoints({{1, 2, 3}, {4, 5, 6}}));
+  point_cloud_common_->update(0, 0);
+
+  parent_display_->findProperty("Style")->setValue("Boxes");
+  point_cloud_common_->update(0, 0);
+
+  auto point_cloud = rviz_default_plugins::findOnePointCloud(scene_manager_->getRootSceneNode());
+  EXPECT_FALSE(point_cloud->usesGpuPoints());
+  ASSERT_THAT(point_cloud->getPoints(), SizeIs(2u));
+  EXPECT_THAT(point_cloud->getPoints()[0].position, Vector3Eq(Ogre::Vector3(1, 2, 3)));
+  EXPECT_THAT(point_cloud->getRenderables(), Not(IsEmpty()));
+}
+
 int main(int argc, char ** argv)
 {
   QApplication app(argc, argv);

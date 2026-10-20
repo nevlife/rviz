@@ -41,15 +41,15 @@
 #include "rviz_rendering/objects/point_cloud.hpp"
 #include "rviz_common/interaction/selection_handler.hpp"
 
-#include "../../../../src/rviz_default_plugins/displays/pointcloud/point_cloud_common.hpp"
-#include "../../../../src/rviz_default_plugins/displays/pointcloud/point_cloud2_display.hpp"
+#include "rviz_default_plugins/displays/pointcloud/point_cloud_common.hpp"
+#include "rviz_default_plugins/displays/pointcloud/point_cloud_selection_handler.hpp"
 
+#include "../../pointcloud_messages.hpp"
 #include "../../scene_graph_introspection.hpp"
 #include "../display_test_fixture.hpp"
-#include "./message_creators.hpp"
 
 using namespace ::testing;  // NOLINT
-using namespace rviz_default_plugins::displays;  // NOLINT
+using namespace rviz_default_plugins;  // NOLINT
 
 MATCHER_P(ContainsWireBoxWithBoundingBox, AABB, "") {
   for (const auto & box : arg) {
@@ -145,6 +145,26 @@ TEST_F(PointCloudSelectionHandlerFixture, onSelect_selects_only_points_actually_
   EXPECT_THAT(
     found_objects,
     ContainsWireBoxWithBoundingBox(Ogre::AxisAlignedBox(0.5f, -1.5f, 0.5f, 1.5f, -0.5f, 1.5f)));
+}
+
+TEST_F(PointCloudSelectionHandlerFixture, onSelect_reads_positions_from_the_message)
+{
+  std::vector<rviz_default_plugins::Point> message_points =
+  {{1, 1, 1}, {-1, -1, 1}, {-1, 1, 1}, {1, -1, 1}};
+  auto message = rviz_default_plugins::createPointCloud2WithPoints(message_points);
+  auto cloud_info = createCloudInfoWithSquare(scene_manager_, context_.get(), message);
+  cloud_info->transformed_points_.clear();
+
+  rviz_common::interaction::Picked picked_object(cloud_info->selection_handler_->getHandle());
+  picked_object.extra_handles.clear();
+  picked_object.extra_handles.insert(3);
+  cloud_info->selection_handler_->onSelect(picked_object);
+
+  auto found_objects = rviz_default_plugins::findAllOgreObjectByType<Ogre::SimpleRenderable>(
+    scene_manager_->getRootSceneNode(), "SimpleRenderable");
+  EXPECT_THAT(
+    found_objects,
+    ContainsWireBoxWithBoundingBox(Ogre::AxisAlignedBox(-1.5f, 0.5f, 0.5f, -0.5f, 1.5f, 1.5f)));
 }
 
 TEST_F(

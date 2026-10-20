@@ -28,6 +28,8 @@
  */
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <vector>
 
 #include "rviz_common/properties/float_property.hpp"
@@ -124,6 +126,63 @@ bool AxisColorPCTransformer::transform(
     getRainbowColor(value, points_out[i].color);
   }
 
+  return true;
+}
+
+bool AxisColorPCTransformer::gpuColor(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+  const Ogre::Matrix4 & transform,
+  rviz_rendering::PointCloud::GpuColor & color)
+{
+  const uint32_t xoff = cloud->fields[findChannelIndex(cloud, "x")].offset;
+  const uint32_t yoff = cloud->fields[findChannelIndex(cloud, "y")].offset;
+  const uint32_t zoff = cloud->fields[findChannelIndex(cloud, "z")].offset;
+  const uint32_t point_step = cloud->point_step;
+  const uint32_t num_points = cloud->width * cloud->height;
+  const int axis = axis_property_->getOptionInt();
+  const bool fixed_frame = use_fixed_frame_property_->getBool();
+
+  float min_value_current = 9999.0f;
+  float max_value_current = -9999.0f;
+  if (auto_compute_bounds_property_->getBool()) {
+    const bool skip_invalid = !cloud->is_dense;
+    const uint8_t * point = cloud->data.data();
+    Ogre::Vector3 pos;
+    for (uint32_t i = 0; i < num_points; ++i, point += point_step) {
+      std::memcpy(&pos.x, point + xoff, sizeof(float));
+      std::memcpy(&pos.y, point + yoff, sizeof(float));
+      std::memcpy(&pos.z, point + zoff, sizeof(float));
+      if (skip_invalid &&
+        (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(pos.z)))
+      {
+        continue;
+      }
+      const float val = fixed_frame ? (transform * pos)[axis] : pos[axis];
+      min_value_current = std::min(min_value_current, val);
+      max_value_current = std::max(max_value_current, val);
+    }
+    min_value_property_->setFloat(min_value_current);
+    max_value_property_->setFloat(max_value_current);
+  } else {
+    min_value_current = min_value_property_->getFloat();
+    max_value_current = max_value_property_->getFloat();
+  }
+
+  float range = max_value_current - min_value_current;
+  if (range == 0) {
+    range = 0.001f;
+  }
+  color.source = rviz_rendering::PointCloud::GpuColor::AXIS;
+  if (fixed_frame) {
+    color.axis = Ogre::Vector4(
+      transform[axis][0], transform[axis][1], transform[axis][2], transform[axis][3]);
+  } else {
+    color.axis = Ogre::Vector4(axis == AXIS_X, axis == AXIS_Y, axis == AXIS_Z, 0.0f);
+  }
+  color.min_value = min_value_current;
+  color.value_range = range;
+  color.rainbow = true;
+  color.invert = false;
   return true;
 }
 

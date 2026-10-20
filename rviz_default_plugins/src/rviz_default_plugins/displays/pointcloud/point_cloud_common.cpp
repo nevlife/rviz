@@ -29,6 +29,7 @@
 
 #include "rviz_default_plugins/displays/pointcloud/point_cloud_common.hpp"
 
+#include <cstring>
 #include <memory>
 #include <set>
 #include <string>
@@ -42,6 +43,7 @@
 
 #include "rviz_default_plugins/displays/pointcloud/point_cloud_to_point_cloud2.hpp"
 #include "rviz_default_plugins/displays/pointcloud/point_cloud_helpers.hpp"
+#include "rviz_default_plugins/displays/pointcloud/transformers/xyz_pc_transformer.hpp"
 #include "rviz_common/display.hpp"
 #include "rviz_common/display_context.hpp"
 #include "rviz_common/properties/enum_property.hpp"
@@ -85,6 +87,19 @@ void CloudInfo::setSelectable(
     selection_handler_.reset();
     cloud_->setPickColor(Ogre::ColourValue(0.0f, 0.0f, 0.0f, 0.0f));
   }
+}
+
+Ogre::Vector3 CloudInfo::pointPosition(uint64_t index) const
+{
+  Ogre::Vector3 position;
+  const uint8_t * point = message_->data.data() + index * message_->point_step;
+  std::memcpy(
+    &position.x, point + message_->fields[findChannelIndex(message_, "x")].offset, sizeof(float));
+  std::memcpy(
+    &position.y, point + message_->fields[findChannelIndex(message_, "y")].offset, sizeof(float));
+  std::memcpy(
+    &position.z, point + message_->fields[findChannelIndex(message_, "z")].offset, sizeof(float));
+  return position;
 }
 
 const std::string PointCloudCommon::message_status_name_ = "Message";  // NOLINT allow std::string
@@ -249,8 +264,12 @@ void PointCloudCommon::updateStyle()
     point_world_size_property_->show();
     point_pixel_size_property_->hide();
   }
+  const bool gpu = rviz_rendering::PointCloud::supportsGpuPoints(mode);
   for (auto const & cloud_info : cloud_infos_) {
     cloud_info->cloud_->setRenderMode(mode);
+    if (cloud_info->gpu_ != gpu) {
+      causeRetransform();
+    }
   }
   updateBillboardSize();
 }
@@ -336,8 +355,7 @@ void PointCloudCommon::insertNewClouds(float point_decay_time, const rclcpp::Tim
         cloud_info->cloud_.reset(new rviz_rendering::PointCloud());
       }
       cloud_info->cloud_->setRenderMode(mode);
-      cloud_info->cloud_->addPoints(
-        cloud_info->transformed_points_.begin(), cloud_info->transformed_points_.end());
+      drawCloud(cloud_info);
       cloud_info->cloud_->setAlpha(alpha_property_->getFloat(), per_point_alpha);
       cloud_info->cloud_->setDimensions(size, size, size);
       cloud_info->cloud_->setAutoSize(auto_size_);
@@ -505,7 +523,8 @@ void PointCloudCommon::updateStatus()
   std::stringstream ss;
   uint64_t total_point_count = 0;
   for (const auto & cloud_info : cloud_infos_) {
-    total_point_count += cloud_info->transformed_points_.size();
+    total_point_count +=
+      static_cast<uint64_t>(cloud_info->message_->width) * cloud_info->message_->height;
   }
   ss << "Showing [" << total_point_count << "] points from [" << cloud_infos_.size() <<
     "] messages";
@@ -584,10 +603,63 @@ void PointCloudCommon::retransform()
 
   for (auto const & cloud_info : cloud_infos_) {
     transformCloud(cloud_info, false);
-    cloud_info->cloud_->clear();
-    cloud_info->cloud_->addPoints(
-      cloud_info->transformed_points_.begin(), cloud_info->transformed_points_.end());
+    drawCloud(cloud_info);
   }
+}
+
+void PointCloudCommon::drawCloud(const CloudInfoPtr & cloud_info)
+{
+  if (!cloud_info->gpu_) {
+    cloud_info->cloud_->clear();
+    cloud_info->cloud_->addPoints(std::move(cloud_info->transformed_points_));
+    return;
+  }
+  if (cloud_info->cloud_->usesGpuPoints()) {
+    cloud_info->cloud_->setGpuColor(cloud_info->gpu_color_);
+    return;
+  }
+  const auto & message = cloud_info->message_;
+  cloud_info->cloud_->setGpuPoints(
+    std::shared_ptr<const uint8_t>(message, message->data.data()),
+    message->width * message->height, cloud_info->gpu_layout_, cloud_info->gpu_color_);
+}
+
+bool PointCloudCommon::gpuPathFor(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+  const PointCloudTransformerPtr & xyz_trans, const PointCloudTransformerPtr & color_trans,
+  rviz_rendering::PointCloud::GpuLayout & layout)
+{
+  auto mode = static_cast<rviz_rendering::PointCloud::RenderMode>(style_property_->getOptionInt());
+  if (!dynamic_cast<XYZPCTransformer *>(xyz_trans.get()) ||
+    !dynamic_cast<GpuColorTransformer *>(color_trans.get()) ||
+    !rviz_rendering::PointCloud::supportsGpuPoints(mode))
+  {
+    return false;
+  }
+  uint32_t offsets[3];
+  const char * names[3] = {"x", "y", "z"};
+  for (int i = 0; i < 3; ++i) {
+    const int32_t index = findChannelIndex(cloud, names[i]);
+    if (index == -1 || cloud->fields[index].datatype != sensor_msgs::msg::PointField::FLOAT32 ||
+      cloud->fields[index].offset + sizeof(float) > cloud->point_step)
+    {
+      return false;
+    }
+    offsets[i] = cloud->fields[index].offset;
+  }
+  layout.point_step = cloud->point_step;
+  layout.x_offset = offsets[0];
+  layout.y_offset = offsets[1];
+  layout.z_offset = offsets[2];
+  layout.dense = cloud->is_dense;
+  return true;
+}
+
+bool PointCloudCommon::drawsOnGpu(const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud)
+{
+  std::unique_lock<std::recursive_mutex> lock(transformers_mutex_);
+  rviz_rendering::PointCloud::GpuLayout layout;
+  return gpuPathFor(cloud, getXYZTransformer(cloud), getColorTransformer(cloud), layout);
 }
 
 bool PointCloudCommon::transformCloud(const CloudInfoPtr & cloud_info, bool update_transformers)
@@ -609,15 +681,13 @@ bool PointCloudCommon::transformCloud(const CloudInfoPtr & cloud_info, bool upda
   V_PointCloudPoint & cloud_points = cloud_info->transformed_points_;
   cloud_points.clear();
 
-  size_t size = cloud_info->message_->width * cloud_info->message_->height;
-  rviz_rendering::PointCloud::Point default_pt = {Ogre::Vector3::ZERO, Ogre::ColourValue(1, 1, 1)};
-  cloud_points.resize(size, default_pt);
-
   if (!transformPoints(cloud_info, cloud_points, update_transformers)) {
     return false;
   }
 
-  setProblematicPointsToInfinity(cloud_points);
+  if (!cloud_info->gpu_) {
+    setProblematicPointsToInfinity(cloud_points);
+  }
   return true;
 }
 
@@ -656,6 +726,18 @@ bool PointCloudCommon::transformPoints(
       rviz_common::properties::StatusProperty::Error, message_status_name_, status);
     return false;
   }
+
+  cloud_info->gpu_ =
+    gpuPathFor(cloud_info->message_, xyz_trans, color_trans, cloud_info->gpu_layout_) &&
+    dynamic_cast<GpuColorTransformer *>(color_trans.get())->gpuColor(
+    cloud_info->message_, transform, cloud_info->gpu_color_);
+  if (cloud_info->gpu_) {
+    return true;
+  }
+
+  size_t size = cloud_info->message_->width * cloud_info->message_->height;
+  rviz_rendering::PointCloud::Point default_pt = {Ogre::Vector3::ZERO, Ogre::ColourValue(1, 1, 1)};
+  cloud_points.resize(size, default_pt);
 
   xyz_trans->transform(
     cloud_info->message_, PointCloudTransformer::Support_XYZ, transform, cloud_points);

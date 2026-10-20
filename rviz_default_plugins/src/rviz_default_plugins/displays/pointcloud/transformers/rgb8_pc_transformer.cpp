@@ -103,4 +103,24 @@ bool RGB8PCTransformer::transform(
   return true;
 }
 
+bool RGB8PCTransformer::gpuColor(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+  const Ogre::Matrix4 & transform,
+  rviz_rendering::PointCloud::GpuColor & color)
+{
+  (void) transform;
+  if (supports(cloud) != Support_Color) {
+    return false;
+  }
+  const int32_t rgb = findChannelIndex(cloud, "rgb");
+  const int32_t index = std::max(rgb, findChannelIndex(cloud, "rgba"));
+  if (cloud->fields[index].offset + sizeof(uint32_t) > cloud->point_step) {
+    return false;
+  }
+  color.source = rgb != -1 ?
+    rviz_rendering::PointCloud::GpuColor::RGB : rviz_rendering::PointCloud::GpuColor::RGBA;
+  color.field_offset = cloud->fields[index].offset;
+  return true;
+}
+
 }  // end namespace rviz_default_plugins

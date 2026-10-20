@@ -28,6 +28,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <string>
 
@@ -98,41 +99,49 @@ uint8_t IntensityPCTransformer::score(const sensor_msgs::msg::PointCloud2::Const
   return 255;
 }
 
-bool IntensityPCTransformer::transform(
-  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
-  uint32_t mask,
-  const Ogre::Matrix4 & transform,
-  V_PointCloudPoint & points_out)
+int32_t IntensityPCTransformer::channelIndex(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud)
 {
-  (void) transform;
-  if (!(mask & Support_Color)) {
-    return false;
-  }
-
   int32_t index = findChannelIndex(cloud, channel_name_property_->getStdString());
-
-  if (index == -1) {
-    if (channel_name_property_->getStdString() == "intensity") {
-      index = findChannelIndex(cloud, "intensities");
-      if (index == -1) {
-        return false;
-      }
-    } else {
-      return false;
-    }
+  if (index == -1 && channel_name_property_->getStdString() == "intensity") {
+    index = findChannelIndex(cloud, "intensities");
   }
+  return index;
+}
 
+void IntensityPCTransformer::valueRange(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud, int32_t index,
+  bool skip_invalid_positions, float & min_intensity, float & diff_intensity)
+{
   const uint32_t offset = cloud->fields[index].offset;
   const uint8_t type = cloud->fields[index].datatype;
   const uint32_t point_step = cloud->point_step;
   const uint32_t num_points = cloud->width * cloud->height;
 
-  float min_intensity = 999999.0f;
+  min_intensity = 999999.0f;
   float max_intensity = -999999.0f;
   if (auto_compute_intensity_bounds_property_->getBool()) {
+    // The CPU path gets clouds without invalid points; the GPU path skips them in the shader.
+    const uint8_t * data = cloud->data.data();
+    uint32_t xyz[3] = {0, 0, 0};
+    if (skip_invalid_positions) {
+      xyz[0] = cloud->fields[findChannelIndex(cloud, "x")].offset;
+      xyz[1] = cloud->fields[findChannelIndex(cloud, "y")].offset;
+      xyz[2] = cloud->fields[findChannelIndex(cloud, "z")].offset;
+    }
     forEachValue(
       *cloud, offset, type, point_step, num_points,
-      [&min_intensity, &max_intensity](uint32_t, float val) {
+      [&](uint32_t i, float val) {
+        if (skip_invalid_positions) {
+          const uint8_t * point = data + static_cast<size_t>(i) * point_step;
+          for (uint32_t o : xyz) {
+            float v;
+            std::memcpy(&v, point + o, sizeof(v));
+            if (!std::isfinite(v)) {
+              return;
+            }
+          }
+        }
         min_intensity = std::min(val, min_intensity);
         max_intensity = std::max(val, max_intensity);
       });
@@ -145,7 +154,7 @@ bool IntensityPCTransformer::transform(
     min_intensity = min_intensity_property_->getFloat();
     max_intensity = max_intensity_property_->getFloat();
   }
-  float diff_intensity = max_intensity - min_intensity;
+  diff_intensity = max_intensity - min_intensity;
   if (diff_intensity == 0) {
     // If min and max are equal, set the diff to something huge so
     // when we divide by it, we effectively get zero.  That way the
@@ -153,6 +162,72 @@ bool IntensityPCTransformer::transform(
     // max are equal.
     diff_intensity = 1e20f;
   }
+}
+
+bool IntensityPCTransformer::gpuColor(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+  const Ogre::Matrix4 & transform,
+  rviz_rendering::PointCloud::GpuColor & color)
+{
+  (void) transform;
+  const int32_t index = channelIndex(cloud);
+  if (index == -1) {
+    return false;
+  }
+  using GpuColor = rviz_rendering::PointCloud::GpuColor;
+  switch (cloud->fields[index].datatype) {
+    case sensor_msgs::msg::PointField::FLOAT32:
+      color.field_type = GpuColor::FLOAT32;
+      break;
+    case sensor_msgs::msg::PointField::INT8:
+    case sensor_msgs::msg::PointField::UINT8:
+      color.field_type = GpuColor::UINT8;
+      break;
+    case sensor_msgs::msg::PointField::INT16:
+    case sensor_msgs::msg::PointField::UINT16:
+      color.field_type = GpuColor::UINT16;
+      break;
+    case sensor_msgs::msg::PointField::INT32:
+    case sensor_msgs::msg::PointField::UINT32:
+      color.field_type = GpuColor::UINT32;
+      break;
+    default:
+      return false;
+  }
+  color.source = GpuColor::FIELD;
+  color.field_offset = cloud->fields[index].offset;
+  valueRange(cloud, index, !cloud->is_dense, color.min_value, color.value_range);
+  color.rainbow = use_rainbow_property_->getBool();
+  color.invert = invert_rainbow_property_->getBool();
+  color.min_color = min_color_property_->getOgreColor();
+  color.max_color = max_color_property_->getOgreColor();
+  return true;
+}
+
+bool IntensityPCTransformer::transform(
+  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud,
+  uint32_t mask,
+  const Ogre::Matrix4 & transform,
+  V_PointCloudPoint & points_out)
+{
+  (void) transform;
+  if (!(mask & Support_Color)) {
+    return false;
+  }
+
+  const int32_t index = channelIndex(cloud);
+  if (index == -1) {
+    return false;
+  }
+
+  const uint32_t offset = cloud->fields[index].offset;
+  const uint8_t type = cloud->fields[index].datatype;
+  const uint32_t point_step = cloud->point_step;
+  const uint32_t num_points = cloud->width * cloud->height;
+
+  float min_intensity;
+  float diff_intensity;
+  valueRange(cloud, index, false, min_intensity, diff_intensity);
   Ogre::ColourValue max_color = max_color_property_->getOgreColor();
   Ogre::ColourValue min_color = min_color_property_->getOgreColor();
 

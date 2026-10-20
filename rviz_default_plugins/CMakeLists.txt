@@ -608,6 +608,20 @@ if(BUILD_TESTING)
     )
   endif()
 
+  ament_add_gmock(point_cloud_selection_handler_test
+    test/rviz_default_plugins/displays/pointcloud/point_cloud_selection_handler_test.cpp
+    ${TEST_FIXTURE_OBJECTS}
+    ${SKIP_DISPLAY_TESTS})
+  if(TARGET point_cloud_selection_handler_test)
+    target_include_directories(point_cloud_selection_handler_test PRIVATE test)
+    target_link_libraries(point_cloud_selection_handler_test
+      ${TEST_FIXTURE_WITH_MOCK_LIBRARIES}
+      rviz_default_plugins
+      pointcloud_messages
+      ogre_testing_environment
+    )
+  endif()
+
   ament_add_gmock(point_cloud_scalar_display_test
     test/rviz_default_plugins/displays/pointcloud/point_cloud_scalar_display_test.cpp
     ${TEST_FIXTURE_OBJECTS}
@@ -625,6 +639,7 @@ if(BUILD_TESTING)
   ament_add_gmock(point_cloud_transformers_test
     test/rviz_default_plugins/displays/pointcloud/point_cloud_transformers/axis_color_pc_transformer_test.cpp
     test/rviz_default_plugins/displays/pointcloud/point_cloud_transformers/flat_color_pc_transformer_test.cpp
+    test/rviz_default_plugins/displays/pointcloud/point_cloud_transformers/gpu_color_test.cpp
     test/rviz_default_plugins/displays/pointcloud/point_cloud_transformers/intensity_pc_transformer_test.cpp
     test/rviz_default_plugins/displays/pointcloud/point_cloud_transformers/rgb8_pc_transformer_test.cpp
     test/rviz_default_plugins/displays/pointcloud/point_cloud_transformers/rgbf32_pc_transformer_test.cpp
