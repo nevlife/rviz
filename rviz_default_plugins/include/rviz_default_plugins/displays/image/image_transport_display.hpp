@@ -148,7 +148,10 @@ protected:
 
   virtual void unsubscribe()
   {
+    // Connection::disconnect() is not idempotent: a second call after the signal owner
+    // is destroyed (onDisable, then the destructor) touches freed memory.
     subscription_callback_.disconnect();
+    subscription_callback_ = message_filters::Connection();
     subscription_.reset();
   }
 
