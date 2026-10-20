@@ -73,7 +73,8 @@ void PointCloud2Display::processMessage(const sensor_msgs::msg::PointCloud2::Con
     return;
   }
 
-  point_cloud_common_->addMessage(filterOutInvalidPoints(cloud));
+  point_cloud_common_->addMessage(
+    cloud->is_dense ? cloud : filterOutInvalidPoints(cloud));
 }
 
 bool PointCloud2Display::hasXYZChannels(
