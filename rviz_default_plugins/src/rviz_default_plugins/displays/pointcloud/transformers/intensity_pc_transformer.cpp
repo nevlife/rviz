@@ -28,12 +28,62 @@
  */
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 
 #include "rviz_default_plugins/displays/pointcloud/transformers/intensity_pc_transformer.hpp"
 
 namespace rviz_default_plugins
 {
+
+namespace
+{
+
+template<typename T, typename F>
+void forEachValueAs(const uint8_t * data, uint32_t point_step, uint32_t num_points, F && f)
+{
+  for (uint32_t i = 0; i < num_points; ++i, data += point_step) {
+    T value;
+    std::memcpy(&value, data, sizeof(T));
+    f(i, static_cast<float>(value));
+  }
+}
+
+// Same conversion as valueFromCloud<float>, with the type switch outside the point loop.
+template<typename F>
+void forEachValue(
+  const sensor_msgs::msg::PointCloud2 & cloud, uint32_t offset, uint8_t type,
+  uint32_t point_step, uint32_t num_points, F && f)
+{
+  const uint8_t * data = cloud.data.data() + offset;
+  switch (type) {
+    case sensor_msgs::msg::PointField::INT8:
+    case sensor_msgs::msg::PointField::UINT8:
+      forEachValueAs<uint8_t>(data, point_step, num_points, f);
+      break;
+    case sensor_msgs::msg::PointField::INT16:
+    case sensor_msgs::msg::PointField::UINT16:
+      forEachValueAs<uint16_t>(data, point_step, num_points, f);
+      break;
+    case sensor_msgs::msg::PointField::INT32:
+    case sensor_msgs::msg::PointField::UINT32:
+      forEachValueAs<uint32_t>(data, point_step, num_points, f);
+      break;
+    case sensor_msgs::msg::PointField::FLOAT32:
+      forEachValueAs<float>(data, point_step, num_points, f);
+      break;
+    case sensor_msgs::msg::PointField::FLOAT64:
+      forEachValueAs<double>(data, point_step, num_points, f);
+      break;
+    default:
+      for (uint32_t i = 0; i < num_points; ++i) {
+        f(i, 0.0f);
+      }
+      break;
+  }
+}
+
+}  // namespace
 
 uint8_t IntensityPCTransformer::supports(
   const sensor_msgs::msg::PointCloud2::ConstSharedPtr & cloud)
@@ -80,11 +130,12 @@ bool IntensityPCTransformer::transform(
   float min_intensity = 999999.0f;
   float max_intensity = -999999.0f;
   if (auto_compute_intensity_bounds_property_->getBool()) {
-    for (uint32_t i = 0; i < num_points; ++i) {
-      float val = valueFromCloud<float>(cloud, offset, type, point_step, i);
-      min_intensity = std::min(val, min_intensity);
-      max_intensity = std::max(val, max_intensity);
-    }
+    forEachValue(
+      *cloud, offset, type, point_step, num_points,
+      [&min_intensity, &max_intensity](uint32_t, float val) {
+        min_intensity = std::min(val, min_intensity);
+        max_intensity = std::max(val, max_intensity);
+      });
 
     min_intensity = std::max(-999999.0f, min_intensity);
     max_intensity = std::min(999999.0f, max_intensity);
@@ -106,26 +157,29 @@ bool IntensityPCTransformer::transform(
   Ogre::ColourValue min_color = min_color_property_->getOgreColor();
 
   if (use_rainbow_property_->getBool()) {
-    for (uint32_t i = 0; i < num_points; ++i) {
-      float val = valueFromCloud<float>(cloud, offset, type, point_step, i);
-      float value = 1.0f - (val - min_intensity) / diff_intensity;
-      if (invert_rainbow_property_->getBool()) {
-        value = 1.0f - value;
-      }
-      getRainbowColor(value, points_out[i].color);
-    }
+    const bool invert = invert_rainbow_property_->getBool();
+    forEachValue(
+      *cloud, offset, type, point_step, num_points,
+      [&](uint32_t i, float val) {
+        float value = 1.0f - (val - min_intensity) / diff_intensity;
+        if (invert) {
+          value = 1.0f - value;
+        }
+        getRainbowColor(value, points_out[i].color);
+      });
   } else {
-    for (uint32_t i = 0; i < num_points; ++i) {
-      float val = valueFromCloud<float>(cloud, offset, type, point_step, i);
-      float normalized_intensity = (val - min_intensity) / diff_intensity;
-      normalized_intensity = std::min(1.0f, std::max(0.0f, normalized_intensity));
-      points_out[i].color.r = max_color.r * normalized_intensity + min_color.r *
+    forEachValue(
+      *cloud, offset, type, point_step, num_points,
+      [&](uint32_t i, float val) {
+        float normalized_intensity = (val - min_intensity) / diff_intensity;
+        normalized_intensity = std::min(1.0f, std::max(0.0f, normalized_intensity));
+        points_out[i].color.r = max_color.r * normalized_intensity + min_color.r *
         (1.0f - normalized_intensity);
-      points_out[i].color.g = max_color.g * normalized_intensity + min_color.g *
+        points_out[i].color.g = max_color.g * normalized_intensity + min_color.g *
         (1.0f - normalized_intensity);
-      points_out[i].color.b = max_color.b * normalized_intensity + min_color.b *
+        points_out[i].color.b = max_color.b * normalized_intensity + min_color.b *
         (1.0f - normalized_intensity);
-    }
+      });
   }
 
   return true;
