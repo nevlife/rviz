@@ -130,6 +130,8 @@ PointCloudCommon::PointCloudCommon(rviz_common::Display * display)
   style_property_->addOption("Spheres", rviz_rendering::PointCloud::RM_SPHERES);
   style_property_->addOption("Boxes", rviz_rendering::PointCloud::RM_BOXES);
   style_property_->addOption("Tiles", rviz_rendering::PointCloud::RM_TILES);
+  style_property_->addOption(
+    "Depth Fade Points", rviz_rendering::PointCloud::RM_DEPTH_FADE_POINTS);
 
   point_world_size_property_ = new rviz_common::properties::FloatProperty(
     "Size (m)", 0.01f,
@@ -160,7 +162,8 @@ PointCloudCommon::PointCloudCommon(rviz_common::Display * display)
   size_field_property_ = new rviz_common::properties::EditableEnumProperty(
     "Size Field", "",
     "Field that scales the size of each point; empty gives all points the same size. "
-    "Applies when the cloud is drawn on the GPU (Points, Squares, Flat Squares, Spheres).",
+    "Applies when the cloud is drawn on the GPU (Points, Squares, Flat Squares, Spheres, "
+    "Depth Fade Points).",
     display_, SLOT(updateSizeField()), this);
   size_min_scale_property_ = new rviz_common::properties::FloatProperty(
     "Min Scale", 0.1f, "Size factor of the points at Min Value.",

@@ -210,3 +210,59 @@ material rviz/PointCloudGpuSphere
     }
   }
 }
+
+material rviz/PointCloudGpuDepthFadePoint
+{
+  technique gpu_exact
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      point_size_attenuation on
+      point_sprites on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_depth_fade.vert(exact) {}
+      fragment_program_ref rviz/glsl120/flat_color_no_alpha.frag {}
+    }
+  }
+  technique gpu
+  {
+    pass
+    {
+      alpha_rejection greater_equal 1
+      point_size_attenuation on
+      point_sprites on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_depth_fade.vert {}
+      fragment_program_ref rviz/glsl120/flat_color_no_alpha.frag {}
+    }
+  }
+  technique gpu_depth
+  {
+    scheme Depth
+    pass
+    {
+      point_size_attenuation on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_depth_fade.vert(with_depth) {}
+      fragment_program_ref rviz/glsl120/depth.frag {}
+    }
+  }
+  technique gpu_selection_first_pass
+  {
+    scheme Pick
+    pass
+    {
+      point_size_attenuation on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_depth_fade.vert(pick) {}
+      fragment_program_ref rviz/glsl120/pickcolor.frag {}
+    }
+  }
+  technique gpu_selection_second_pass
+  {
+    scheme Pick1
+    pass
+    {
+      point_size_attenuation on
+      vertex_program_ref rviz/glsl130/point_cloud_gpu_depth_fade.vert(pick_index) {}
+      fragment_program_ref rviz/glsl120/pass_color.frag {}
+    }
+  }
+}

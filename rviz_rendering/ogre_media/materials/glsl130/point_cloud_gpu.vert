@@ -11,6 +11,7 @@
 // BILLBOARD: one instance per point, "vertex" is the corner of the template quad.
 // Otherwise one GL point per point and "vertex" is x.
 // The position w is vertex.w (1, the attribute default), like gl_Vertex.w in the CPU-path shaders.
+// DEPTH_FADE: GL points sized from the world size and the camera distance, as depth_fade_point.vert.
 
 uniform mat4 worldviewproj_matrix;
 uniform vec4 size;
@@ -25,9 +26,18 @@ uniform vec4 size_range;
 uniform vec4 camera_pos;
 uniform vec4 auto_size;
 #endif
-#ifdef WITH_DEPTH
+#if defined(WITH_DEPTH) || defined(DEPTH_FADE)
 uniform mat4 worldview_matrix;
+#endif
+#ifdef WITH_DEPTH
 varying float depth;
+#endif
+#ifdef DEPTH_FADE
+uniform mat4 projection_matrix;
+uniform vec4 viewport_height;
+uniform float alpha;
+const float MAX_PIXEL_SIZE = 100.0;
+const float MIN_ALPHA_THRESHOLD = 0.04;
 #endif
 
 attribute vec4 vertex;
@@ -72,6 +82,15 @@ float sizeScale()
   t = isnan(t) ? 0.0 : clamp(t, 0.0, 1.0);
   return mix(size_field.z, size_field.w, t);
 }
+
+#ifdef DEPTH_FADE
+float hash21(vec3 p)
+{
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+#endif
 
 vec3 rainbow(float value)
 {
@@ -162,10 +181,22 @@ void main()
   if (size_field.x > 0.5) {
     point_size *= sizeScale();
   }
+#ifdef DEPTH_FADE
+  float view_depth = -(worldview_matrix * pos).z;
+  // m[3][3] is 0 for a perspective projection and 1 for an orthographic one.
+  bool is_ortho = projection_matrix[3][3] > 0.5;
+  point_size *= projection_matrix[1][1] / (is_ortho ? 1.0 : view_depth) * (viewport_height.x * 0.5);
+  gl_PointSize = clamp(point_size, 1.0, MAX_PIXEL_SIZE);
+#else
   gl_PointSize = point_size;
 #endif
+#endif
 
-  if (any(isnan(p)) || any(isinf(p))) {
+  bool hidden = any(isnan(p)) || any(isinf(p));
+#ifdef DEPTH_FADE
+  hidden = hidden || view_depth < 1e-6;
+#endif
+  if (hidden) {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
   } else {
     gl_Position = worldviewproj_matrix * pos;
@@ -182,6 +213,16 @@ void main()
     255.0;
 #elif defined(WITH_DEPTH) || defined(NO_COLOR)
   gl_FrontColor = vec4(1.0);
+#elif defined(DEPTH_FADE)
+  vec4 color = pointColor(p);
+  float final_alpha = color.a * alpha * clamp(point_size * point_size, 0.0, 1.0);
+  if (final_alpha < MIN_ALPHA_THRESHOLD) {
+    if (hash21(p) * MIN_ALPHA_THRESHOLD > final_alpha) {
+      gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+    }
+    final_alpha = MIN_ALPHA_THRESHOLD;
+  }
+  gl_FrontColor = vec4(color.rgb, final_alpha);
 #else
   gl_FrontColor = pointColor(p);
 #endif

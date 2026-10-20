@@ -160,3 +160,90 @@ vertex_program rviz/glsl130/point_cloud_gpu_billboard.vert(pick_index) glsl
     param_named_auto size_range custom 13
   }
 }
+
+vertex_program rviz/glsl130/point_cloud_gpu_depth_fade.vert glsl
+{
+  source point_cloud_gpu.vert
+  preprocessor_defines DEPTH_FADE=1
+  default_params {
+    param_named_auto worldviewproj_matrix worldviewproj_matrix
+    param_named_auto worldview_matrix worldview_matrix
+    param_named_auto projection_matrix projection_matrix
+    param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
+    param_named_auto viewport_height custom 14
+    param_named_auto alpha custom 1
+    param_named_auto color_mode custom 7
+    param_named_auto color_range custom 8
+    param_named_auto color_a custom 9
+    param_named_auto color_b custom 10
+    param_named_auto color_axis custom 11
+  }
+}
+
+vertex_program rviz/glsl130/point_cloud_gpu_depth_fade.vert(exact) glsl
+{
+  source point_cloud_gpu.vert
+  preprocessor_defines DEPTH_FADE=1;EXACT=1
+  default_params {
+    param_named_auto worldviewproj_matrix worldviewproj_matrix
+    param_named_auto worldview_matrix worldview_matrix
+    param_named_auto projection_matrix projection_matrix
+    param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
+    param_named_auto viewport_height custom 14
+    param_named_auto alpha custom 1
+    param_named_auto color_mode custom 7
+    param_named_auto color_range custom 8
+    param_named_auto color_a custom 9
+    param_named_auto color_b custom 10
+    param_named_auto color_axis custom 11
+  }
+}
+
+vertex_program rviz/glsl130/point_cloud_gpu_depth_fade.vert(with_depth) glsl
+{
+  source point_cloud_gpu.vert
+  preprocessor_defines DEPTH_FADE=1;WITH_DEPTH=1
+  default_params {
+    param_named_auto worldviewproj_matrix worldviewproj_matrix
+    param_named_auto worldview_matrix worldview_matrix
+    param_named_auto projection_matrix projection_matrix
+    param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
+    param_named_auto viewport_height custom 14
+  }
+}
+
+vertex_program rviz/glsl130/point_cloud_gpu_depth_fade.vert(pick) glsl
+{
+  source point_cloud_gpu.vert
+  preprocessor_defines DEPTH_FADE=1;NO_COLOR=1
+  default_params {
+    param_named_auto worldviewproj_matrix worldviewproj_matrix
+    param_named_auto worldview_matrix worldview_matrix
+    param_named_auto projection_matrix projection_matrix
+    param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
+    param_named_auto viewport_height custom 14
+  }
+}
+
+vertex_program rviz/glsl130/point_cloud_gpu_depth_fade.vert(pick_index) glsl
+{
+  source point_cloud_gpu.vert
+  preprocessor_defines DEPTH_FADE=1;PICK_INDEX=1
+  default_params {
+    param_named_auto worldviewproj_matrix worldviewproj_matrix
+    param_named_auto worldview_matrix worldview_matrix
+    param_named_auto projection_matrix projection_matrix
+    param_named_auto size custom 0
+    param_named_auto size_field custom 12
+    param_named_auto size_range custom 13
+    param_named_auto viewport_height custom 14
+  }
+}

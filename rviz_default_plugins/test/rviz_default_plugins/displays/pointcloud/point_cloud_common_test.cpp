@@ -325,6 +325,24 @@ TEST_F(PointCloudCommonTestFixture, size_field_warns_when_the_cloud_is_drawn_on_
   EXPECT_FALSE(point_cloud->usesGpuPoints());
 }
 
+TEST_F(PointCloudCommonTestFixture, depth_fade_points_use_the_world_size) {
+  point_cloud_common_->initialize(
+    context_.get(), scene_manager_->getRootSceneNode()->createChildSceneNode());
+  mockValidTransform();
+  parent_display_->findProperty("Style")->setValue("Depth Fade Points");
+  parent_display_->findProperty("Size (m)")->setValue(0.25f);
+
+  point_cloud_common_->addMessage(createPointCloud2WithPoints({{1, 2, 3}, {4, 5, 6}}));
+  point_cloud_common_->update(0, 0);
+
+  auto point_cloud = rviz_default_plugins::findOnePointCloud(scene_manager_->getRootSceneNode());
+  ASSERT_TRUE(point_cloud);
+  EXPECT_THAT(
+    point_cloud->getRenderables()[0]->getCustomParameter(RVIZ_RENDERING_SIZE_PARAMETER).x,
+    Eq(0.25f));
+  EXPECT_FALSE(parent_display_->findProperty("Size (m)")->getHidden());
+}
+
 int main(int argc, char ** argv)
 {
   QApplication app(argc, argv);

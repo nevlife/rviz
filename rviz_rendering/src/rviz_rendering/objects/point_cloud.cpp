@@ -53,6 +53,7 @@
 #include <OgreSharedPtr.h>
 #include <OgreTechnique.h>
 #include <OgreCamera.h>
+#include <OgreViewport.h>
 #include <OgreRenderSystem.h>
 #include <OgreRenderSystemCapabilities.h>
 
@@ -161,6 +162,8 @@ uint32_t PointCloud::getVerticesPerPoint()
       return 6;
     case RM_BOXES:
       return 36;
+    case RM_DEPTH_FADE_POINTS:
+      return 1;
     default:
       throw std::runtime_error("unexpected render_mode_");
   }
@@ -184,6 +187,8 @@ float * PointCloud::getVertices()
       return g_billboard_vertices;
     case RM_BOXES:
       return g_box_vertices;
+    case RM_DEPTH_FADE_POINTS:
+      return g_point_vertices;
     default:
       throw std::runtime_error("unexpected render_mode_");
   }
@@ -200,6 +205,8 @@ static const char * gpuMaterialName(PointCloud::RenderMode mode)
       return "rviz/PointCloudGpuFlatSquare";
     case PointCloud::RM_SPHERES:
       return "rviz/PointCloudGpuSphere";
+    case PointCloud::RM_DEPTH_FADE_POINTS:
+      return "rviz/PointCloudGpuDepthFadePoint";
     default:
       return nullptr;
   }
@@ -216,6 +223,8 @@ Ogre::MaterialPtr PointCloud::getGpuMaterial(RenderMode mode)
       return gpu_flat_square_material_;
     case RM_SPHERES:
       return gpu_sphere_material_;
+    case RM_DEPTH_FADE_POINTS:
+      return gpu_depth_fade_point_material_;
     default:
       return Ogre::MaterialPtr();
   }
@@ -236,6 +245,8 @@ Ogre::MaterialPtr PointCloud::getMaterialForRenderMode(RenderMode mode)
       return Ogre::MaterialPtr(tile_material_);
     case RM_BOXES:
       return Ogre::MaterialPtr(box_material_);
+    case RM_DEPTH_FADE_POINTS:
+      return Ogre::MaterialPtr(depth_fade_point_material_);
     default:
       throw std::runtime_error("unexpected render_mode_");
   }
@@ -258,6 +269,8 @@ PointCloud::PointCloud()
   sphere_material_ = Ogre::MaterialManager::getSingleton().getByName("rviz/PointCloudSphere");
   tile_material_ = Ogre::MaterialManager::getSingleton().getByName("rviz/PointCloudTile");
   box_material_ = Ogre::MaterialManager::getSingleton().getByName("rviz/PointCloudBox");
+  depth_fade_point_material_ = Ogre::MaterialManager::getSingleton().getByName(
+    "rviz/PointCloudDepthFadePoint");
 
   point_material_ = Ogre::MaterialPtr(point_material_)->clone(ss.str() + "Point");
   square_material_ = Ogre::MaterialPtr(square_material_)->clone(ss.str() + "Square");
@@ -265,6 +278,8 @@ PointCloud::PointCloud()
   sphere_material_ = Ogre::MaterialPtr(sphere_material_)->clone(ss.str() + "Sphere");
   tile_material_ = Ogre::MaterialPtr(tile_material_)->clone(ss.str() + "Tiles");
   box_material_ = Ogre::MaterialPtr(box_material_)->clone(ss.str() + "Box");
+  depth_fade_point_material_ =
+    Ogre::MaterialPtr(depth_fade_point_material_)->clone(ss.str() + "DepthFadePoint");
 
   point_material_->load();
   square_material_->load();
@@ -272,6 +287,7 @@ PointCloud::PointCloud()
   sphere_material_->load();
   tile_material_->load();
   box_material_->load();
+  depth_fade_point_material_->load();
 
   setAlpha(1.0f);
   setRenderMode(RM_SPHERES);
@@ -296,6 +312,7 @@ PointCloud::~PointCloud()
   sphere_material_->unload();
   tile_material_->unload();
   box_material_->unload();
+  depth_fade_point_material_->unload();
 
   removeMaterial(point_material_);
   removeMaterial(square_material_);
@@ -303,9 +320,10 @@ PointCloud::~PointCloud()
   removeMaterial(sphere_material_);
   removeMaterial(tile_material_);
   removeMaterial(box_material_);
+  removeMaterial(depth_fade_point_material_);
 
   for (auto material : {&gpu_point_material_, &gpu_square_material_, &gpu_flat_square_material_,
-      &gpu_sphere_material_})
+      &gpu_sphere_material_, &gpu_depth_fade_point_material_})
   {
     if (*material) {
       (*material)->unload();
@@ -504,8 +522,9 @@ void PointCloud::setAlpha(float alpha, bool per_point_alpha)
 
   const bool blend = alpha < rviz_rendering::unit_alpha_threshold || per_point_alpha;
   for (auto material : {&point_material_, &square_material_, &flat_square_material_,
-      &sphere_material_, &tile_material_, &box_material_, &gpu_point_material_,
-      &gpu_square_material_, &gpu_flat_square_material_, &gpu_sphere_material_})
+      &sphere_material_, &tile_material_, &box_material_, &depth_fade_point_material_,
+      &gpu_point_material_, &gpu_square_material_, &gpu_flat_square_material_,
+      &gpu_sphere_material_, &gpu_depth_fade_point_material_})
   {
     if (!*material) {
       continue;
@@ -629,7 +648,7 @@ Ogre::RenderOperation::OperationType PointCloud::getRenderOperationType() const
   if (current_mode_supports_geometry_shader_) {
     op_type = Ogre::RenderOperation::OT_POINT_LIST;
   } else {
-    if (render_mode_ == RM_POINTS) {
+    if (render_mode_ == RM_POINTS || render_mode_ == RM_DEPTH_FADE_POINTS) {
       op_type = Ogre::RenderOperation::OT_POINT_LIST;
     } else {
       op_type = Ogre::RenderOperation::OT_TRIANGLE_LIST;
@@ -780,6 +799,14 @@ void PointCloud::resetBoundingBoxForCurrentPoints()
 void PointCloud::_notifyCurrentCamera(Ogre::Camera * camera)
 {
   Ogre::MovableObject::_notifyCurrentCamera(camera);
+  if (render_mode_ != RM_DEPTH_FADE_POINTS || !camera || !camera->getViewport()) {
+    return;
+  }
+  const Ogre::Vector4 height(
+    static_cast<float>(camera->getViewport()->getActualHeight()), 0.0f, 0.0f, 0.0f);
+  for (auto & renderable : renderables_) {
+    renderable->setCustomParameter(RVIZ_RENDERING_VIEWPORT_HEIGHT_PARAMETER, height);
+  }
 }
 
 void PointCloud::_updateRenderQueue(Ogre::RenderQueue * queue)
@@ -850,6 +877,8 @@ void PointCloud::initializeRenderable(const PointCloudRenderablePtr & rend)
   rend->setCustomParameter(RVIZ_RENDERING_PICK_COLOR_PARAMETER, pick_col);
   rend->setCustomParameter(RVIZ_RENDERING_NORMAL_PARAMETER, Ogre::Vector4(common_direction_));
   rend->setCustomParameter(RVIZ_RENDERING_UP_PARAMETER, Ogre::Vector4(common_up_vector_));
+  rend->setCustomParameter(
+    RVIZ_RENDERING_VIEWPORT_HEIGHT_PARAMETER, Ogre::Vector4(600.0f, 0.0f, 0.0f, 0.0f));
   if (getParentSceneNode() && !rend->isAttached()) {
     getParentSceneNode()->attachObject(rend.get());
   }
@@ -873,7 +902,7 @@ bool PointCloud::supportsGpuPoints(RenderMode mode)
   if (!name) {
     return false;
   }
-  if (mode != RM_POINTS) {
+  if (mode != RM_POINTS && mode != RM_DEPTH_FADE_POINTS) {
     Ogre::RenderSystem * render_system = Ogre::Root::getSingleton().getRenderSystem();
     if (!render_system || !render_system->getCapabilities() ||
       !render_system->getCapabilities()->hasCapability(Ogre::RSC_VERTEX_BUFFER_INSTANCE_DATA))
@@ -905,7 +934,8 @@ void PointCloud::createGpuMaterials()
   auto & manager = Ogre::MaterialManager::getSingleton();
   const std::pair<Ogre::MaterialPtr *, RenderMode> materials[] = {
     {&gpu_point_material_, RM_POINTS}, {&gpu_square_material_, RM_SQUARES},
-    {&gpu_flat_square_material_, RM_FLAT_SQUARES}, {&gpu_sphere_material_, RM_SPHERES}};
+    {&gpu_flat_square_material_, RM_FLAT_SQUARES}, {&gpu_sphere_material_, RM_SPHERES},
+    {&gpu_depth_fade_point_material_, RM_DEPTH_FADE_POINTS}};
   for (const auto & entry : materials) {
     *entry.first = manager.getByName(gpuMaterialName(entry.second))->clone(
       prefix + std::to_string(entry.second));
@@ -1007,7 +1037,7 @@ void PointCloud::rebuildGpuRenderable()
   declaration->removeAllElements();
   binding->unsetAllBindings();
 
-  const bool instanced = render_mode_ != RM_POINTS;
+  const bool instanced = render_mode_ != RM_POINTS && render_mode_ != RM_DEPTH_FADE_POINTS;
   uint16_t source = 0;
   if (instanced) {
     Ogre::HardwareVertexBufferSharedPtr corners = gpuTemplate(render_mode_);

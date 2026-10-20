@@ -561,6 +561,35 @@ TEST_F(GpuPointCloudTestFixture, disabling_the_size_field_unbinds_it) {
     Eq(0.0f));
 }
 
+TEST_F(GpuPointCloudTestFixture, depth_fade_points_draw_one_vertex_per_point) {
+  ASSERT_TRUE(
+    rviz_rendering::PointCloud::supportsGpuPoints(
+      rviz_rendering::PointCloud::RM_DEPTH_FADE_POINTS));
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setRenderMode(rviz_rendering::PointCloud::RM_DEPTH_FADE_POINTS);
+
+  point_cloud->setGpuPoints(gpuRecords(gpu_square), 4, gpuLayout(), {});
+
+  auto op = point_cloud->getRenderables()[0]->getRenderOperation();
+  EXPECT_THAT(op->vertexData->vertexCount, Eq(4u));
+  EXPECT_THAT(op->numberOfInstances, Eq(1u));
+  EXPECT_THAT(op->operationType, Eq(Ogre::RenderOperation::OT_POINT_LIST));
+}
+
+TEST_F(PointCloudTestFixture, depth_fade_points_on_the_cpu_draw_one_vertex_per_point) {
+  auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
+  point_cloud->setRenderMode(rviz_rendering::PointCloud::RM_DEPTH_FADE_POINTS);
+
+  point_cloud->addPoints(squareCenteredAtZero.begin(), squareCenteredAtZero.end());
+
+  auto renderable = point_cloud->getRenderables()[0];
+  EXPECT_THAT(renderable->getRenderOperation()->vertexData->vertexCount, Eq(4u));
+  EXPECT_THAT(
+    renderable->getRenderOperation()->operationType, Eq(Ogre::RenderOperation::OT_POINT_LIST));
+  EXPECT_THAT(
+    renderable->getCustomParameter(RVIZ_RENDERING_VIEWPORT_HEIGHT_PARAMETER).x, Gt(0.0f));
+}
+
 TEST_F(PointCloudTestFixture, addPoints_by_value_takes_the_points) {
   auto point_cloud = std::make_shared<rviz_rendering::PointCloud>();
   std::vector<rviz_rendering::PointCloud::Point> points = squareCenteredAtZero;
