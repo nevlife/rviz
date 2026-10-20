@@ -477,6 +477,10 @@ void PointCloud::addPoints(
 
   RenderableInternals internals = createNewRenderable(num_points);
 
+  const uint32_t vertices_per_point = getVerticesPerPoint();
+  const float * vertices = getVertices();
+  const bool write_vertex_offsets = !current_mode_supports_geometry_shader_;
+
   for (auto current_point = start_iterator; current_point < stop_iterator; ++current_point) {
     if (internals.bufferIsFull()) {
       assert(internals.noBufferOverflowOccurred());
@@ -488,9 +492,10 @@ void PointCloud::addPoints(
       internals = createNewRenderable(static_cast<uint32_t>(stop_iterator - current_point));
     }
     internals.aabb.merge(current_point->position);
-    internals = addPointToHardwareBuffer(
+    addPointToHardwareBuffer(
       internals, current_point,
-      static_cast<uint32_t>(current_point - start_iterator));
+      static_cast<uint32_t>(current_point - start_iterator),
+      vertices_per_point, vertices, write_vertex_offsets);
   }
 
   finishRenderable(internals, internals.current_vertex_count);
@@ -536,7 +541,7 @@ Ogre::RenderOperation::OperationType PointCloud::getRenderOperationType() const
 
 void
 PointCloud::finishRenderable(
-  PointCloud::RenderableInternals internals,
+  const PointCloud::RenderableInternals & internals,
   uint32_t vertex_count_of_renderable)
 {
   Ogre::RenderOperation * op = internals.rend->getRenderOperation();
@@ -571,25 +576,25 @@ uint32_t PointCloud::getColorForPoint(
   return color;
 }
 
-PointCloud::RenderableInternals
+void
 PointCloud::addPointToHardwareBuffer(
-  PointCloud::RenderableInternals internals,
-  std::vector<PointCloud::Point>::iterator point, uint32_t current_point)
+  PointCloud::RenderableInternals & internals,
+  std::vector<PointCloud::Point>::iterator point, uint32_t current_point,
+  uint32_t vertices_per_point, const float * vertices, bool write_vertex_offsets) const
 {
   uint32_t color = getColorForPoint(current_point, point);
-  float * vertices = getVertices();
   float * float_buffer = internals.float_buffer;
 
   float x = point->position.x;
   float y = point->position.y;
   float z = point->position.z;
 
-  for (uint32_t j = 0; j < getVerticesPerPoint(); ++j, ++internals.current_vertex_count) {
+  for (uint32_t j = 0; j < vertices_per_point; ++j, ++internals.current_vertex_count) {
     *float_buffer++ = x;
     *float_buffer++ = y;
     *float_buffer++ = z;
 
-    if (!current_mode_supports_geometry_shader_) {
+    if (write_vertex_offsets) {
       *float_buffer++ = vertices[(j * 3)];
       *float_buffer++ = vertices[(j * 3) + 1];
       *float_buffer++ = vertices[(j * 3) + 2];
@@ -609,7 +614,6 @@ PointCloud::addPointToHardwareBuffer(
 #endif
 
   internals.float_buffer = float_buffer;
-  return internals;
 }
 
 void PointCloud::popPoints(uint32_t num_points)

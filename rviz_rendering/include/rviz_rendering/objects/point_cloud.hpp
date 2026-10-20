@@ -281,7 +281,7 @@ private:
   Ogre::RenderOperation::OperationType getRenderOperationType() const;
 
   RVIZ_RENDERING_PUBLIC
-  void finishRenderable(RenderableInternals internals, uint32_t vertex_count_of_renderable);
+  void finishRenderable(const RenderableInternals & internals, uint32_t vertex_count_of_renderable);
 
   RVIZ_RENDERING_PUBLIC
   uint32_t getColorForPoint(
@@ -289,9 +289,10 @@ private:
     std::vector<PointCloud::Point>::iterator point) const;
 
   RVIZ_RENDERING_PUBLIC
-  RenderableInternals addPointToHardwareBuffer(
-    RenderableInternals internals,
-    std::vector<PointCloud::Point>::iterator point, uint32_t current_point);
+  void addPointToHardwareBuffer(
+    RenderableInternals & internals,
+    std::vector<PointCloud::Point>::iterator point, uint32_t current_point,
+    uint32_t vertices_per_point, const float * vertices, bool write_vertex_offsets) const;
 
   Ogre::AxisAlignedBox bounding_box_;       ///< The bounding box of this point cloud
 
