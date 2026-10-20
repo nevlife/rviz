@@ -30,6 +30,8 @@
 #include "rviz_default_plugins/displays/image/ros_image_texture.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <deque>
 #include <limits>
 #include <map>
@@ -53,6 +55,8 @@
 #include "rviz_common/logging.hpp"
 #include "rviz_common/uniform_string_stream.hpp"
 
+#include "gpu_image_converter.hpp"
+
 namespace rviz_default_plugins
 {
 namespace displays
@@ -65,7 +69,8 @@ ROSImageTexture::ROSImageTexture()
   texture_format_(Ogre::PF_UNKNOWN),
   width_(0),
   height_(0),
-  median_frames_(5)
+  median_frames_(5),
+  linear_input_(false)
 {
   empty_image_.load("no_image.png", "rviz_rendering");
 
@@ -85,11 +90,17 @@ ROSImageTexture::~ROSImageTexture()
   current_image_.reset();
 }
 
+void ROSImageTexture::setLinearInput(bool linear_input)
+{
+  linear_input_ = linear_input;
+}
+
 void ROSImageTexture::clear()
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
   texture_->unload();
+  texture_->setUsage(Ogre::TU_DEFAULT);
   texture_->loadImage(empty_image_);
   texture_format_ = Ogre::PF_UNKNOWN;
 
@@ -234,6 +245,10 @@ bool ROSImageTexture::update()
     }
   }
 
+  if (convertOnGpu(image->encoding, data_ptr, data_size)) {
+    return true;
+  }
+
   ImageData image_data = setFormatAndNormalizeDataIfNecessary(
     image->encoding, data_ptr, data_size);
 
@@ -257,6 +272,7 @@ bool ROSImageTexture::update()
       Ogre::Image ogre_image;
       ogre_image.loadDynamicImage(pixels, width_, height_, 1, image_data.pixel_format_);
       texture_->unload();
+      texture_->setUsage(Ogre::TU_DEFAULT);
       texture_->loadImage(ogre_image);
       texture_width_ = width_;
       texture_height_ = height_;
@@ -565,6 +581,116 @@ ROSImageTexture::setFormatAndNormalizeDataIfNecessary(
   } else {
     throw UnsupportedImageEncoding(encoding);
   }
+}
+
+// sRGB transfer of a linear value in [0, 1], as in rviz PR #1749.
+static double srgbEncode(double linear)
+{
+  if (linear <= 0.0031308) {
+    return 12.92 * linear;
+  }
+  return 1.055 * std::pow(linear, 1.0 / 2.4) - 0.055;
+}
+
+static uint8_t srgbByte(double linear)
+{
+  return static_cast<uint8_t>(std::lround(std::clamp(srgbEncode(linear), 0.0, 1.0) * 255.0));
+}
+
+bool ROSImageTexture::convertOnGpu(
+  const std::string & encoding, const uint8_t * data_ptr, size_t data_size_in_bytes)
+{
+  namespace enc = sensor_msgs::image_encodings;
+  const size_t pixels = static_cast<size_t>(width_) * height_;
+  const bool gray16 = encoding == enc::TYPE_16UC1 || encoding == enc::TYPE_16SC1 ||
+    encoding == enc::MONO16;
+  const bool float32 = encoding == enc::TYPE_32FC1;
+  const bool bayer = enc::isBayer(encoding);
+  if (!(gray16 || float32 || bayer) || pixels == 0 || !GpuImageConverter::supported()) {
+    return false;
+  }
+  const size_t bytes_per_pixel = static_cast<size_t>(enc::bitDepth(encoding) / 8);
+  if (data_size_in_bytes < pixels * bytes_per_pixel) {
+    return false;
+  }
+
+  GpuImageConverter::Params params;
+  double min_value = 0.0;
+  double max_value = 0.0;
+  if (float32) {
+    params.mode = GpuImageConverter::FLOAT32;
+    getMinimalAndMaximalValueToNormalize<float>(
+      reinterpret_cast<const float *>(data_ptr), pixels, min_value, max_value);
+    params.min = min_value;
+    params.range = max_value - min_value;
+    if (!std::isfinite(params.range)) {
+      params.range = 0.0;
+    }
+  } else if (gray16 || bytes_per_pixel == 2) {
+    getMinimalAndMaximalValueToNormalize<uint16_t>(
+      reinterpret_cast<const uint16_t *>(data_ptr), pixels, min_value, max_value);
+    const double range = max_value - min_value;
+    lut_.assign(65536, 0);
+    if (range > 0.0 && std::isfinite(range)) {
+      for (size_t i = 0; i < lut_.size(); ++i) {
+        const double value = static_cast<double>(i);
+        if (gray16) {
+          // Same arithmetic as convertTo8bit.
+          lut_[i] = static_cast<uint8_t>(
+            std::clamp((value - min_value) / range, 0.0, 1.0) * 255u);
+        } else if (linear_input_) {
+          const double scaled = std::clamp((value - min_value) * (65535.0 / range), 0.0, 65535.0);
+          lut_[i] = srgbByte(static_cast<double>(std::lround(scaled)) / 65535.0);
+        } else {
+          lut_[i] = static_cast<uint8_t>(
+            std::lround(std::clamp((value - min_value) * (255.0 / range), 0.0, 255.0)));
+        }
+      }
+    }
+    params.mode = gray16 ? GpuImageConverter::GRAY16 : GpuImageConverter::BAYER16;
+    params.lut = lut_.data();
+  } else {
+    params.mode = GpuImageConverter::BAYER8;
+    if (linear_input_) {
+      static const std::array<uint8_t, 256> srgb = []() {
+          std::array<uint8_t, 256> table;
+          for (size_t i = 0; i < table.size(); ++i) {
+            table[i] = srgbByte(static_cast<double>(i) / 255.0);
+          }
+          return table;
+        }();
+      params.lut = srgb.data();
+    }
+  }
+  if (bayer) {
+    // Position of the red sample in the 2x2 cell.
+    params.red_row = encoding.find("bggr") != std::string::npos ||
+      encoding.find("gbrg") != std::string::npos ? 1 : 0;
+    params.red_col = encoding.find("bggr") != std::string::npos ||
+      encoding.find("grbg") != std::string::npos ? 1 : 0;
+  }
+
+  if (width_ != texture_width_ || height_ != texture_height_ ||
+    texture_format_ != Ogre::PF_BYTE_RGBA || texture_->getUsage() != Ogre::TU_RENDERTARGET)
+  {
+    // The converter renders into the texture the displays already sample.
+    texture_->unload();
+    texture_->setUsage(Ogre::TU_RENDERTARGET);
+    texture_->setTextureType(Ogre::TEX_TYPE_2D);
+    texture_->setFormat(Ogre::PF_BYTE_RGBA);
+    texture_->setWidth(width_);
+    texture_->setHeight(height_);
+    texture_->setNumMipmaps(0);
+    texture_->createInternalResources();
+    texture_width_ = width_;
+    texture_height_ = height_;
+    texture_format_ = Ogre::PF_BYTE_RGBA;
+  }
+  if (!gpu_converter_) {
+    gpu_converter_ = std::make_unique<GpuImageConverter>();
+  }
+  gpu_converter_->convert(data_ptr, width_, height_, params, texture_);
+  return true;
 }
 
 void ROSImageTexture::addMessage(sensor_msgs::msg::Image::ConstSharedPtr msg)

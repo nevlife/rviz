@@ -97,7 +97,17 @@ ImageDisplay::ImageDisplay(std::unique_ptr<ROSImageTextureIface> texture)
     this,
     SLOT(updateNormalizeOptions()));
 
+  linear_input_property_ = new rviz_common::properties::BoolProperty(
+    "Linear input", false,
+    "Treat pixel values as linear light and apply sRGB encoding before display. "
+    "Use this for sources that output linear-response images, "
+    "which would otherwise appear too dark on a standard display. "
+    "This option only affects Bayer-encoded images.",
+    this, SLOT(updateLinearInput()));
+  linear_input_property_->setHidden(true);
+
   got_float_image_ = false;
+  got_bayer_image_ = false;
 }
 
 void ImageDisplay::onInitialize()
@@ -105,6 +115,7 @@ void ImageDisplay::onInitialize()
   ITDClass::onInitialize();
 
   updateNormalizeOptions();
+  updateLinearInput();
   setupScreenRectangle();
 
   setupRenderPanel();
@@ -126,6 +137,11 @@ void ImageDisplay::onDisable()
 {
   ITDClass::unsubscribe();
   clear();
+}
+
+void ImageDisplay::updateLinearInput()
+{
+  texture_->setLinearInput(linear_input_property_->getBool());
 }
 
 void ImageDisplay::updateNormalizeOptions()
@@ -197,11 +213,18 @@ void ImageDisplay::processMessage(sensor_msgs::msg::Image::ConstSharedPtr msg)
   bool got_float_image = msg->encoding == sensor_msgs::image_encodings::TYPE_32FC1 ||
     msg->encoding == sensor_msgs::image_encodings::TYPE_16UC1 ||
     msg->encoding == sensor_msgs::image_encodings::TYPE_16SC1 ||
-    msg->encoding == sensor_msgs::image_encodings::MONO16;
+    msg->encoding == sensor_msgs::image_encodings::MONO16 ||
+    (sensor_msgs::image_encodings::isBayer(msg->encoding) &&
+    sensor_msgs::image_encodings::bitDepth(msg->encoding) == 16);
 
   if (got_float_image != got_float_image_) {
     got_float_image_ = got_float_image;
     updateNormalizeOptions();
+  }
+  const bool got_bayer_image = sensor_msgs::image_encodings::isBayer(msg->encoding);
+  if (got_bayer_image != got_bayer_image_) {
+    got_bayer_image_ = got_bayer_image;
+    linear_input_property_->setHidden(!got_bayer_image);
   }
   texture_->addMessage(msg);
 }

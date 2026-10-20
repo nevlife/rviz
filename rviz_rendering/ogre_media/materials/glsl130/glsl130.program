@@ -247,3 +247,32 @@ vertex_program rviz/glsl130/point_cloud_gpu_depth_fade.vert(pick_index) glsl
     param_named_auto viewport_height custom 14
   }
 }
+
+// Raw image conversion for ROSImageTexture (see image_convert.frag).
+
+vertex_program rviz/glsl130/image_convert.vert glsl
+{
+  source image_convert.vert
+  default_params {
+    param_named_auto worldviewproj_matrix worldviewproj_matrix
+  }
+}
+
+fragment_program rviz/glsl130/image_convert.frag glsl
+{
+  source image_convert.frag
+  default_params {
+    param_named raw int 0
+    param_named lut int 1
+  }
+}
+
+fragment_program rviz/glsl130/image_convert.frag(fp64) glsl
+{
+  source image_convert.frag
+  preprocessor_defines FP64=1
+  default_params {
+    param_named raw int 0
+    param_named lut int 1
+  }
+}

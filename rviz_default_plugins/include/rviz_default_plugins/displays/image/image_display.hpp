@@ -86,6 +86,7 @@ public:
 
 public Q_SLOTS:
   virtual void updateNormalizeOptions();
+  void updateLinearInput();
 
 protected:
   // overrides from Display
@@ -112,7 +113,9 @@ private:
   rviz_common::properties::FloatProperty * min_property_;
   rviz_common::properties::FloatProperty * max_property_;
   rviz_common::properties::IntProperty * median_buffer_size_property_;
+  rviz_common::properties::BoolProperty * linear_input_property_;
   bool got_float_image_;
+  bool got_bayer_image_;
 };
 
 }  // namespace displays

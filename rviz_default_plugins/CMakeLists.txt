@@ -151,6 +151,7 @@ set(rviz_default_plugins_source_files
   src/rviz_default_plugins/displays/fluid_pressure/fluid_pressure_display.cpp
   src/rviz_default_plugins/displays/illuminance/illuminance_display.cpp
   src/rviz_default_plugins/displays/image/get_transport_from_topic.cpp
+  src/rviz_default_plugins/displays/image/gpu_image_converter.cpp
   src/rviz_default_plugins/displays/image/image_display.cpp
   src/rviz_default_plugins/displays/image/ros_image_texture.cpp
   src/rviz_default_plugins/displays/interactive_markers/integer_action.cpp

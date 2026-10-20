@@ -1,0 +1,50 @@
+// Renders a raw image texture (unit 0) through image_convert.frag; unit 1 is the value table.
+// The fp64 technique matches the CPU conversion of float images bit for bit.
+
+material rviz/ImageConvert
+{
+  technique gpu_fp64
+  {
+    pass
+    {
+      lighting off
+      depth_check off
+      depth_write off
+      cull_hardware none
+      vertex_program_ref rviz/glsl130/image_convert.vert {}
+      fragment_program_ref rviz/glsl130/image_convert.frag(fp64) {}
+      texture_unit raw
+      {
+        filtering none
+        tex_address_mode clamp
+      }
+      texture_unit lut
+      {
+        filtering none
+        tex_address_mode clamp
+      }
+    }
+  }
+  technique gpu
+  {
+    pass
+    {
+      lighting off
+      depth_check off
+      depth_write off
+      cull_hardware none
+      vertex_program_ref rviz/glsl130/image_convert.vert {}
+      fragment_program_ref rviz/glsl130/image_convert.frag {}
+      texture_unit raw
+      {
+        filtering none
+        tex_address_mode clamp
+      }
+      texture_unit lut
+      {
+        filtering none
+        tex_address_mode clamp
+      }
+    }
+  }
+}

@@ -81,6 +81,8 @@ struct ImageData final
   bool has_ownership_;
 };
 
+class GpuImageConverter;
+
 class ROSImageTexture : public ROSImageTextureIface
 {
 public:
@@ -121,6 +123,9 @@ public:
   RVIZ_DEFAULT_PLUGINS_PUBLIC
   void setMedianFrames(unsigned median_frames) override;
 
+  RVIZ_DEFAULT_PLUGINS_PUBLIC
+  void setLinearInput(bool linear_input) override;
+
 private:
   template<typename T>
   void getMinimalAndMaximalValueToNormalize(
@@ -131,6 +136,8 @@ private:
   ImageData convertYUV422_YUY2ToRGBData(const uint8_t * data_ptr, size_t data_size_in_bytes);
 
   ImageData setFormatAndNormalizeDataIfNecessary(
+    const std::string & encoding, const uint8_t * data_ptr, size_t data_size_in_bytes);
+  bool convertOnGpu(
     const std::string & encoding, const uint8_t * data_ptr, size_t data_size_in_bytes);
 
   sensor_msgs::msg::Image::ConstSharedPtr current_image_;
@@ -154,6 +161,10 @@ private:
   unsigned median_frames_;
   std::deque<double> min_buffer_;
   std::deque<double> max_buffer_;
+
+  bool linear_input_;
+  std::vector<uint8_t> lut_;
+  std::unique_ptr<GpuImageConverter> gpu_converter_;
 };
 
 }  // namespace displays

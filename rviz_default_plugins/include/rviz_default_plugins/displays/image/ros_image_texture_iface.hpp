@@ -62,6 +62,9 @@ public:
   virtual void setNormalizeFloatImage(bool normalize) = 0;
   virtual void setNormalizeFloatImage(bool normalize, double min, double max) = 0;
   virtual void setMedianFrames(unsigned median_frames) = 0;
+
+  // Bayer images: apply the sRGB transfer to linear sensor values.
+  virtual void setLinearInput(bool linear_input) {(void) linear_input;}
 };
 
 }  // namespace displays
