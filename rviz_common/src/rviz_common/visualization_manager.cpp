@@ -65,6 +65,7 @@
 #include "rviz_common/display_group.hpp"
 #include "./displays_panel.hpp"
 #include "frame_manager.hpp"
+#include "ros_integration/gui_dispatch_executor.hpp"
 #include "rviz_common/load_resource.hpp"
 #include "rviz_common/properties/color_property.hpp"
 #include "rviz_common/properties/int_property.hpp"
@@ -145,7 +146,7 @@ VisualizationManager::VisualizationManager(
   window_manager_(wm),
   clock_(clock),
   private_(new VisualizationManagerPrivate),
-  executor_(std::make_shared<rclcpp::executors::SingleThreadedExecutor>()),
+  executor_(std::make_shared<ros_integration::GuiDispatchExecutor>()),
   rviz_ros_node_(ros_node_abstraction)
 {
   // visibility_bit_allocator_ is listed after default_visibility_bit_
@@ -227,6 +228,7 @@ VisualizationManager::VisualizationManager(
   connect(this, SIGNAL(timeJumped()), this, SLOT(resetTime()));
 
   executor_->add_node(rviz_ros_node_.lock()->get_raw_node());
+  executor_->start();
 
   display_factory_ = new DisplayFactory();
 
@@ -236,6 +238,7 @@ VisualizationManager::VisualizationManager(
 
 VisualizationManager::~VisualizationManager()
 {
+  executor_->stop();
   delete update_timer_;
 
   shutting_down_ = true;
@@ -347,7 +350,7 @@ void VisualizationManager::onUpdate()
     resetTime();
   }
 
-  executor_->spin_some(std::chrono::milliseconds(10));
+  executor_->dispatch(std::chrono::milliseconds(10));
 
   Q_EMIT preUpdate();
 

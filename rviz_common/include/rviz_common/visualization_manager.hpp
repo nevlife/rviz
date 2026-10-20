@@ -56,6 +56,10 @@ class Root;
 
 namespace rviz_common
 {
+namespace ros_integration
+{
+class GuiDispatchExecutor;
+}
 
 namespace properties
 {
@@ -399,7 +403,7 @@ private:
   uint32_t default_visibility_bit_;
   BitAllocator visibility_bit_allocator_;
   QString help_path_;
-  rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
+  std::shared_ptr<ros_integration::GuiDispatchExecutor> executor_;
   ros_integration::RosNodeAbstractionIface::WeakPtr rviz_ros_node_;
   rviz_common::transformation::TransformationManager * transformation_manager_;
 };

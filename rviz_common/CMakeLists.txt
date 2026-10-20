@@ -195,6 +195,7 @@ set(rviz_common_source_files
   src/rviz_common/properties/tf_frame_property.cpp
   src/rviz_common/properties/vector_property.cpp
   src/rviz_common/render_panel.cpp
+  src/rviz_common/ros_integration/gui_dispatch_executor.cpp
   src/rviz_common/ros_integration/ros_client_abstraction.cpp
   src/rviz_common/ros_integration/ros_node_abstraction.cpp
   src/rviz_common/scaled_image_widget.cpp
@@ -401,6 +402,13 @@ if(BUILD_TESTING)
   )
   if(TARGET rviz_common_ros_node_abstraction_test)
     target_link_libraries(rviz_common_ros_node_abstraction_test rviz_common)
+  endif()
+
+  ament_add_gmock(rviz_common_gui_dispatch_executor_test
+    test/gui_dispatch_executor_test.cpp
+  )
+  if(TARGET rviz_common_gui_dispatch_executor_test)
+    target_link_libraries(rviz_common_gui_dispatch_executor_test rviz_common)
   endif()
 
   ament_add_gmock(identity_transformer_test
