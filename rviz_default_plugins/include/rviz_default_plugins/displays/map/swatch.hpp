@@ -75,11 +75,13 @@ public:
   RVIZ_DEFAULT_PLUGINS_PUBLIC
   void updateData(const nav_msgs::msg::OccupancyGrid & map);
 
+  /// Uploads the cells of map inside the given rectangle (in map cells) that this swatch covers.
   RVIZ_DEFAULT_PLUGINS_PUBLIC
-  void setVisible(bool visible);
+  void updateData(
+    const nav_msgs::msg::OccupancyGrid & map, size_t x, size_t y, size_t width, size_t height);
 
   RVIZ_DEFAULT_PLUGINS_PUBLIC
-  void resetOldTexture();
+  void setVisible(bool visible);
 
   RVIZ_DEFAULT_PLUGINS_PUBLIC
   void setRenderQueueGroup(uint8_t group);
@@ -95,7 +97,6 @@ public:
 
 private:
   void setupMaterial();
-  void resetTexture(Ogre::DataStreamPtr & pixel_stream);
   void setupSceneNodeWithManualObject();
   void setupSquareManualObject();
   void addPointWithPlaneCoordinates(float x, float y);
@@ -110,7 +111,6 @@ private:
   Ogre::SceneNode * scene_node_;
   Ogre::ManualObject * manual_object_;
   Ogre::TexturePtr texture_;
-  Ogre::TexturePtr old_texture_;
   Ogre::MaterialPtr material_;
   size_t x_, y_, width_, height_;
 };

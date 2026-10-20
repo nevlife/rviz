@@ -34,6 +34,7 @@
 #include <string>
 #include <vector>
 
+#include <OgreHardwarePixelBuffer.h>
 #include <OgreManualObject.h>
 #include <OgreMaterialManager.h>
 #include <OgreRenderable.h>
@@ -104,6 +105,9 @@ Swatch::Swatch(
 Swatch::~Swatch()
 {
   scene_manager_->destroyManualObject(manual_object_);
+  if (texture_) {
+    Ogre::TextureManager::getSingleton().remove(texture_);
+  }
 }
 
 void Swatch::updateAlpha(
@@ -119,43 +123,64 @@ void Swatch::updateAlpha(
 
 void Swatch::updateData(const nav_msgs::msg::OccupancyGrid & map)
 {
-  size_t pixels_size = width_ * height_;
-  size_t map_size = map.data.size();
-  size_t map_width = map.info.width;
+  updateData(map, x_, y_, width_, height_);
+}
 
-  auto pixels = std::vector<unsigned char>(pixels_size, 255);
-
-  auto pixel_data = pixels.begin();
-  for (size_t map_row = y_; map_row < y_ + height_; map_row++) {
-    size_t pixel_index = map_row * map_width + x_;
-    size_t pixels_to_copy = std::min(width_, map_size - pixel_index);
-
-    auto row_start = map.data.begin() + pixel_index;
-    std::copy(row_start, row_start + pixels_to_copy, pixel_data);
-    pixel_data += pixels_to_copy;
-    if (pixel_index + pixels_to_copy >= map_size) {
-      break;
-    }
+void Swatch::updateData(
+  const nav_msgs::msg::OccupancyGrid & map, size_t x, size_t y, size_t width, size_t height)
+{
+  if (!texture_) {
+    texture_ = Ogre::TextureManager::getSingleton().createManual(
+      "MapTexture" + std::to_string(texture_count_++), "rviz_rendering", Ogre::TEX_TYPE_2D,
+      static_cast<Ogre::uint>(width_), static_cast<Ogre::uint>(height_), 0, Ogre::PF_L8,
+      Ogre::TU_STATIC_WRITE_ONLY);
+    x = x_;
+    y = y_;
+    width = width_;
+    height = height_;
+  }
+  const size_t left = std::max(x, x_);
+  const size_t top = std::max(y, y_);
+  const size_t right = std::min(x + width, x_ + width_);
+  const size_t bottom = std::min(y + height, y_ + height_);
+  if (left >= right || top >= bottom) {
+    return;
   }
 
-  Ogre::DataStreamPtr pixel_stream(new Ogre::MemoryDataStream(pixels.data(), pixels_size));
+  const size_t map_width = map.info.width;
+  auto cells = reinterpret_cast<uint8_t *>(const_cast<int8_t *>(map.data.data()));
+  Ogre::PixelBox source(
+    Ogre::Box(
+      static_cast<uint32_t>(left), static_cast<uint32_t>(top),
+      static_cast<uint32_t>(right), static_cast<uint32_t>(bottom)),
+    Ogre::PF_L8, cells);
+  source.rowPitch = map_width;
+  source.slicePitch = map_width * map.info.height;
 
-  resetTexture(pixel_stream);
-  resetOldTexture();
+  // The GL upload keeps 4-byte row alignment when the copied width is a multiple of 4,
+  // which only matches the map rows when they are a multiple of 4 too.
+  std::vector<uint8_t> packed;
+  if ((right - left) % 4 == 0 && map_width % 4 != 0) {
+    const size_t row_bytes = right - left;
+    packed.resize(row_bytes * (bottom - top));
+    for (size_t row = top; row < bottom; ++row) {
+      std::copy_n(cells + row * map_width + left, row_bytes, &packed[(row - top) * row_bytes]);
+    }
+    source = Ogre::PixelBox(
+      static_cast<uint32_t>(right - left), static_cast<uint32_t>(bottom - top), 1, Ogre::PF_L8,
+      packed.data());
+  }
+
+  texture_->getBuffer()->blitFromMemory(
+    source, Ogre::Box(
+      static_cast<uint32_t>(left - x_), static_cast<uint32_t>(top - y_),
+      static_cast<uint32_t>(right - x_), static_cast<uint32_t>(bottom - y_)));
 }
 
 void Swatch::setVisible(bool visible)
 {
   if (manual_object_) {
     manual_object_->setVisible(visible);
-  }
-}
-
-void Swatch::resetOldTexture()
-{
-  if (old_texture_) {
-    Ogre::TextureManager::getSingleton().remove(old_texture_);
-    old_texture_.reset();
   }
 }
 
@@ -187,18 +212,6 @@ std::string Swatch::getTextureName()
     return texture_->getName();
   }
   return "";
-}
-
-void Swatch::resetTexture(Ogre::DataStreamPtr & pixel_stream)
-{
-  old_texture_ = texture_;
-
-  texture_ = Ogre::TextureManager::getSingleton().loadRawData(
-    "MapTexture" + std::to_string(texture_count_++),
-    "rviz_rendering",
-    pixel_stream,
-    static_cast<uint16_t>(width_), static_cast<uint16_t>(height_),
-    Ogre::PF_L8, Ogre::TEX_TYPE_2D, 0);
 }
 
 void Swatch::setupMaterial()

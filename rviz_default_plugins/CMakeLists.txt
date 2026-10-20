@@ -493,6 +493,15 @@ if(BUILD_TESTING)
     target_link_libraries(map_display_test ${TEST_FIXTURE_WITH_MOCK_LIBRARIES} rviz_default_plugins ogre_testing_environment)
   endif()
 
+  ament_add_gmock(swatch_test
+    ${TEST_FIXTURE_OBJECTS}
+    test/rviz_default_plugins/displays/map/swatch_test.cpp
+    ${SKIP_DISPLAY_TESTS})
+  if(TARGET swatch_test)
+    target_include_directories(swatch_test PRIVATE test)
+    target_link_libraries(swatch_test ${TEST_FIXTURE_WITH_MOCK_LIBRARIES} rviz_default_plugins ogre_testing_environment)
+  endif()
+
   ament_add_gmock(measure_tool_test
     test/rviz_default_plugins/tools/measure/measure_tool_test.cpp
     ${TEST_FIXTURE_OBJECTS}

@@ -384,6 +384,15 @@ void MapDisplay::incomingUpdate(const map_msgs::msg::OccupancyGridUpdate::ConstS
   updateMapDataInMemory(update);
   setStatus(rviz_common::properties::StatusProperty::Ok, "Update", "Update OK");
 
+  // Only the updated cells change: upload them into the existing textures.
+  if (!swatches_.empty()) {
+    for (const auto & swatch : swatches_) {
+      swatch->updateData(current_map_, update->x, update->y, update->width, update->height);
+    }
+    context_->queueRender();
+    return;
+  }
+
   // updated via signal in case ros spinner is in a different thread
   Q_EMIT mapUpdated();
 }
@@ -609,10 +618,11 @@ void MapDisplay::updateSwatches() const
       tex_unit = pass->createTextureUnitState();
     }
 
-    tex_unit->setTextureName(swatch->getTextureName());
-    tex_unit->setTextureFiltering(Ogre::TFO_NONE);
+    if (tex_unit->getTextureName() != swatch->getTextureName()) {
+      tex_unit->setTextureName(swatch->getTextureName());
+      tex_unit->setTextureFiltering(Ogre::TFO_NONE);
+    }
     swatch->setVisible(true);
-    swatch->resetOldTexture();
   }
 }
 
