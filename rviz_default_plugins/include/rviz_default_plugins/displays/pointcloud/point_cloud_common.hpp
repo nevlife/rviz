@@ -232,6 +232,7 @@ private:
   std::mutex new_clouds_mutex_;
 
   L_CloudInfo obsolete_cloud_infos_;
+  std::shared_ptr<rviz_rendering::PointCloud> spare_cloud_;
 
   struct TransformerInfo
   {

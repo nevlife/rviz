@@ -298,6 +298,7 @@ void PointCloud::clear()
     getParentSceneNode()->needUpdate();
   }
 
+  spare_renderables_.insert(spare_renderables_.end(), renderables_.begin(), renderables_.end());
   renderables_.clear();
 }
 
@@ -345,6 +346,7 @@ void PointCloud::setRenderMode(RenderMode mode)
 
   if (changingGeometrySupportIsNecessary(current_material_)) {
     renderables_.clear();
+    spare_renderables_.clear();
   }
 
   for (auto & renderable : renderables_) {
@@ -499,6 +501,7 @@ void PointCloud::addPoints(
   }
 
   finishRenderable(internals, internals.current_vertex_count);
+  spare_renderables_.clear();
 
   point_count_ += num_points;
 
@@ -515,10 +518,14 @@ PointCloud::createNewRenderable(uint32_t number_of_points_to_be_added)
     VERTEX_BUFFER_CAPACITY,
     number_of_points_to_be_added * getVerticesPerPoint());
 
-  internals.rend = createRenderable(internals.buffer_size, getRenderOperationType());
+  internals.rend = reuseSpareRenderable(internals.buffer_size, getRenderOperationType());
+  const bool reused = internals.rend != nullptr;
+  if (!reused) {
+    internals.rend = createRenderable(internals.buffer_size, getRenderOperationType());
+  }
 
   internals.float_buffer = reinterpret_cast<float *>(internals.rend->getBuffer()
-    ->lock(Ogre::HardwareBuffer::HBL_NO_OVERWRITE));
+    ->lock(reused ? Ogre::HardwareBuffer::HBL_DISCARD : Ogre::HardwareBuffer::HBL_NO_OVERWRITE));
 
   internals.aabb.setNull();
   return internals;
@@ -710,6 +717,33 @@ PointCloudRenderablePtr PointCloud::createRenderable(
 {
   PointCloudRenderablePtr rend(new PointCloudRenderable(
       this, num_points, !current_mode_supports_geometry_shader_, operation_type));
+  initializeRenderable(rend);
+  return rend;
+}
+
+PointCloudRenderablePtr PointCloud::reuseSpareRenderable(
+  uint32_t num_vertices, Ogre::RenderOperation::OperationType operation_type)
+{
+  for (auto it = spare_renderables_.begin(); it != spare_renderables_.end(); ++it) {
+    if ((*it)->getBuffer()->getNumVertices() < num_vertices) {
+      continue;
+    }
+    PointCloudRenderablePtr rend = *it;
+    spare_renderables_.erase(it);
+    Ogre::RenderOperation * op = rend->getRenderOperation();
+    op->operationType = operation_type;
+    op->vertexData->vertexStart = 0;
+    op->vertexData->vertexCount = 0;
+    rend->removeCustomParameter(RVIZ_RENDERING_AUTO_SIZE_PARAMETER);
+    rend->setVisibilityFlags(Ogre::MovableObject::getDefaultVisibilityFlags());
+    initializeRenderable(rend);
+    return rend;
+  }
+  return nullptr;
+}
+
+void PointCloud::initializeRenderable(const PointCloudRenderablePtr & rend)
+{
   rend->setMaterial(current_material_);
   Ogre::Vector4 alpha(alpha_, 0.0f, 0.0f, 0.0f);
   Ogre::Vector4 highlight(0.0f, 0.0f, 0.0f, 0.0f);
@@ -724,8 +758,6 @@ PointCloudRenderablePtr PointCloud::createRenderable(
     getParentSceneNode()->attachObject(rend.get());
   }
   renderables_.push_back(rend);
-
-  return rend;
 }
 
 PointCloudRenderableQueue PointCloud::getRenderables()

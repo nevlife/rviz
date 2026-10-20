@@ -265,6 +265,11 @@ private:
     Ogre::RenderOperation::OperationType
     operation_type);
 
+  PointCloudRenderablePtr reuseSpareRenderable(
+    uint32_t num_vertices, Ogre::RenderOperation::OperationType operation_type);
+
+  void initializeRenderable(const PointCloudRenderablePtr & rend);
+
   RVIZ_RENDERING_PUBLIC
   void regenerateAll();
 
@@ -318,6 +323,7 @@ private:
   bool color_by_index_;
 
   PointCloudRenderableQueue renderables_;
+  PointCloudRenderableQueue spare_renderables_;
 
   bool current_mode_supports_geometry_shader_;
   Ogre::ColourValue pick_color_;

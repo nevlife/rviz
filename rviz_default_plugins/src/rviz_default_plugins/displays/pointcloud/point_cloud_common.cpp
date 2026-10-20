@@ -278,6 +278,7 @@ void PointCloudCommon::reset()
   std::unique_lock<std::mutex> lock(new_clouds_mutex_);
   cloud_infos_.clear();
   new_cloud_infos_.clear();
+  spare_cloud_.reset();
 }
 
 void PointCloudCommon::causeRetransform()
@@ -328,7 +329,12 @@ void PointCloudCommon::insertNewClouds(float point_decay_time, const rclcpp::Tim
 
       bool per_point_alpha = findChannelIndex(cloud_info->message_, "rgba") != -1;
 
-      cloud_info->cloud_.reset(new rviz_rendering::PointCloud());
+      if (spare_cloud_) {
+        cloud_info->cloud_ = std::move(spare_cloud_);
+        cloud_info->cloud_->clearAndRemoveAllPoints();
+      } else {
+        cloud_info->cloud_.reset(new rviz_rendering::PointCloud());
+      }
       cloud_info->cloud_->setRenderMode(mode);
       cloud_info->cloud_->addPoints(
         cloud_info->transformed_points_.begin(), cloud_info->transformed_points_.end());
@@ -411,6 +417,9 @@ void PointCloudCommon::removeObsoleteCloudInfos()
   auto end = obsolete_cloud_infos_.end();
   while (it != end) {
     if (!(*it)->selection_handler_.get() || !(*it)->selection_handler_->hasSelections()) {
+      if (!spare_cloud_ && it->use_count() == 1 && (*it)->cloud_.use_count() == 1) {
+        spare_cloud_ = std::move((*it)->cloud_);
+      }
       it = obsolete_cloud_infos_.erase(it);
     }
     if (it != end) {
