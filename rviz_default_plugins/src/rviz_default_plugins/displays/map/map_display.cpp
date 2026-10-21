@@ -374,6 +374,14 @@ void MapDisplay::incomingUpdate(const map_msgs::msg::OccupancyGridUpdate::ConstS
     "Topic",
     topic_str);
 
+  const size_t cells = static_cast<size_t>(current_map_.info.width) * current_map_.info.height;
+  if (current_map_.data.size() != cells) {
+    setStatus(
+      rviz_common::properties::StatusProperty::Error,
+      "Update", "The current map has an invalid size.");
+    return;
+  }
+
   if (updateDataOutOfBounds(update)) {
     setStatus(
       rviz_common::properties::StatusProperty::Error,
@@ -384,8 +392,11 @@ void MapDisplay::incomingUpdate(const map_msgs::msg::OccupancyGridUpdate::ConstS
   updateMapDataInMemory(update);
   setStatus(rviz_common::properties::StatusProperty::Ok, "Update", "Update OK");
 
-  // Only the updated cells change: upload them into the existing textures.
-  if (!swatches_.empty()) {
+  // Only the updated cells change: upload them into the existing textures, if they show this map.
+  if (!swatches_.empty() && width_ == current_map_.info.width &&
+    height_ == current_map_.info.height && resolution_ == current_map_.info.resolution &&
+    validateFloats(current_map_))
+  {
     for (const auto & swatch : swatches_) {
       swatch->updateData(current_map_, update->x, update->y, update->width, update->height);
     }

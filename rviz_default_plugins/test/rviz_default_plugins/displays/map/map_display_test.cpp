@@ -37,6 +37,9 @@
 #include <vector>
 
 #include <OgreManualObject.h>
+#include <OgreMaterialManager.h>
+#include <OgreResourceManager.h>
+#include <OgreTextureManager.h>
 
 #include "rviz_default_plugins/displays/map/map_display.hpp"
 #include "../../scene_graph_introspection.hpp"
@@ -44,13 +47,20 @@
 
 using namespace ::testing;  // NOLINT
 
+class UpdatableMapDisplay : public rviz_default_plugins::displays::MapDisplay
+{
+public:
+  using MapDisplay::MapDisplay;
+  using MapDisplay::incomingUpdate;
+};
+
 class MapTestFixture : public DisplayTestFixture
 {
 public:
   void SetUp() override
   {
     DisplayTestFixture::SetUp();
-    map_display_ = std::make_shared<rviz_default_plugins::displays::MapDisplay>(context_.get());
+    map_display_ = std::make_shared<UpdatableMapDisplay>(context_.get());
   }
 
   void TearDown() override
@@ -105,7 +115,19 @@ public:
     EXPECT_THAT(manual_objects, IsEmpty());
   }
 
-  std::shared_ptr<rviz_default_plugins::displays::MapDisplay> map_display_;
+  map_msgs::msg::OccupancyGridUpdate::SharedPtr createUpdate(
+    int32_t x, int32_t y, uint32_t width, uint32_t height)
+  {
+    auto update = std::make_shared<map_msgs::msg::OccupancyGridUpdate>();
+    update->x = x;
+    update->y = y;
+    update->width = width;
+    update->height = height;
+    update->data.assign(width * height, 100);
+    return update;
+  }
+
+  std::shared_ptr<UpdatableMapDisplay> map_display_;
 };
 
 TEST_F(MapTestFixture, showMap_does_not_print_map_if_map_is_empty) {
@@ -212,4 +234,120 @@ TEST_F(MapTestFixture, createSwatches_creates_more_swatches_if_map_is_too_big) {
     scene_manager_->getRootSceneNode(), "ManualObject");
 
   EXPECT_THAT(manual_objects, SizeIs(8));
+}
+
+TEST_F(MapTestFixture, reset_destroys_the_swatch_scene_nodes) {
+  mockValidTransform();
+
+  map_display_->processMessage(createMapMessage());
+
+  auto manual_objects = rviz_default_plugins::findAllOgreObjectByType<Ogre::ManualObject>(
+    scene_manager_->getRootSceneNode(), "ManualObject");
+  ASSERT_THAT(manual_objects, SizeIs(1));
+
+  auto swatch_node = manual_objects[0]->getParentSceneNode();
+  auto swatch_node_name = swatch_node->getName();
+  auto map_node = swatch_node->getParentSceneNode();
+  ASSERT_TRUE(scene_manager_->hasSceneNode(swatch_node_name));
+
+  map_display_->reset();
+
+  EXPECT_FALSE(scene_manager_->hasSceneNode(swatch_node_name));
+  EXPECT_THAT(map_node->numChildren(), Eq(0u));
+}
+
+TEST_F(MapTestFixture, recreating_swatches_destroys_the_previous_swatch_scene_nodes) {
+  mockValidTransform();
+
+  map_display_->processMessage(createMapMessage(50, 50));
+
+  auto manual_objects = rviz_default_plugins::findAllOgreObjectByType<Ogre::ManualObject>(
+    scene_manager_->getRootSceneNode(), "ManualObject");
+  ASSERT_THAT(manual_objects, SizeIs(1));
+
+  auto old_swatch_node = manual_objects[0]->getParentSceneNode();
+  auto old_swatch_node_name = old_swatch_node->getName();
+  auto map_node = old_swatch_node->getParentSceneNode();
+
+  map_display_->processMessage(createMapMessage(60, 60));
+
+  EXPECT_FALSE(scene_manager_->hasSceneNode(old_swatch_node_name));
+  EXPECT_THAT(map_node->numChildren(), Eq(1u));
+}
+
+TEST_F(MapTestFixture, repeatedly_resizing_the_map_does_not_accumulate_scene_nodes) {
+  mockValidTransform();
+
+  map_display_->processMessage(createMapMessage(50, 50));
+
+  auto manual_objects = rviz_default_plugins::findAllOgreObjectByType<Ogre::ManualObject>(
+    scene_manager_->getRootSceneNode(), "ManualObject");
+  ASSERT_THAT(manual_objects, SizeIs(1));
+  auto map_node = manual_objects[0]->getParentSceneNode()->getParentSceneNode();
+
+  for (uint32_t size = 51; size <= 60; size++) {
+    map_display_->processMessage(createMapMessage(size, size));
+  }
+
+  EXPECT_THAT(map_node->numChildren(), Eq(1u));
+}
+
+static size_t countResourcesNamed(Ogre::ResourceManager & manager, const std::string & prefix)
+{
+  size_t count = 0;
+  auto resources = manager.getResourceIterator();
+  while (resources.hasMoreElements()) {
+    if (resources.getNext()->getName().compare(0, prefix.size(), prefix) == 0) {
+      count++;
+    }
+  }
+  return count;
+}
+
+TEST_F(MapTestFixture, repeatedly_resizing_the_map_does_not_accumulate_textures_or_materials) {
+  mockValidTransform();
+
+  map_display_->processMessage(createMapMessage(50, 50));
+
+  auto & texture_manager = Ogre::TextureManager::getSingleton();
+  auto & material_manager = Ogre::MaterialManager::getSingleton();
+  ASSERT_THAT(countResourcesNamed(texture_manager, "MapTexture"), Eq(1u));
+  ASSERT_THAT(countResourcesNamed(material_manager, "MapMaterial"), Eq(1u));
+
+  for (uint32_t size = 51; size <= 60; size++) {
+    map_display_->processMessage(createMapMessage(size, size));
+  }
+
+  EXPECT_THAT(countResourcesNamed(texture_manager, "MapTexture"), Eq(1u));
+  EXPECT_THAT(countResourcesNamed(material_manager, "MapMaterial"), Eq(1u));
+
+  map_display_->reset();
+
+  EXPECT_THAT(countResourcesNamed(texture_manager, "MapTexture"), Eq(0u));
+  EXPECT_THAT(countResourcesNamed(material_manager, "MapMaterial"), Eq(0u));
+}
+
+TEST_F(MapTestFixture, update_after_a_map_with_too_little_data_is_ignored) {
+  mockValidTransform();
+  map_display_->processMessage(createMapMessage(100, 100));
+
+  auto short_map = createMapMessage(120, 120);
+  short_map->data.resize(100);
+  map_display_->processMessage(short_map);
+
+  EXPECT_CALL(*context_, queueRender()).Times(0);
+  map_display_->incomingUpdate(createUpdate(0, 0, 5, 5));
+  map_display_->incomingUpdate(createUpdate(110, 110, 5, 5));
+}
+
+TEST_F(MapTestFixture, update_after_a_rejected_map_does_not_reach_the_old_swatches) {
+  mockValidTransform();
+  map_display_->processMessage(createMapMessage(100, 100));
+
+  auto nan_map = createMapMessage(120, 120);
+  nan_map->info.origin.position.x = nan("NaN");
+  map_display_->processMessage(nan_map);
+
+  EXPECT_CALL(*context_, queueRender()).Times(0);
+  map_display_->incomingUpdate(createUpdate(0, 0, 5, 5));
 }

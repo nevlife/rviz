@@ -68,6 +68,9 @@ public:
   RVIZ_DEFAULT_PLUGINS_PUBLIC
   ~Swatch();
 
+  Swatch(const Swatch &) = delete;
+  Swatch & operator=(const Swatch &) = delete;
+
   RVIZ_DEFAULT_PLUGINS_PUBLIC
   void updateAlpha(
     const Ogre::SceneBlendType & sceneBlending, bool depth_write, float alpha);

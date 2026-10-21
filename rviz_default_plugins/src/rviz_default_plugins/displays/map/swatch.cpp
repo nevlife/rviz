@@ -85,6 +85,7 @@ Swatch::Swatch(
   float resolution, bool draw_under)
 : scene_manager_(scene_manager),
   parent_scene_node_(parent_scene_node),
+  scene_node_(nullptr),
   manual_object_(nullptr),
   x_(x), y_(y), width_(width), height_(height)
 {
@@ -105,9 +106,11 @@ Swatch::Swatch(
 Swatch::~Swatch()
 {
   scene_manager_->destroyManualObject(manual_object_);
+  scene_manager_->destroySceneNode(scene_node_);
   if (texture_) {
     Ogre::TextureManager::getSingleton().remove(texture_);
   }
+  Ogre::MaterialManager::getSingleton().remove(material_);
 }
 
 void Swatch::updateAlpha(
