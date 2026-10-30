@@ -68,6 +68,7 @@ public:
   RVIZ_DEFAULT_PLUGINS_PUBLIC
   ~Swatch();
 
+  // Owns raw Ogre resources that are destroyed in the destructor, so copying would double-free.
   Swatch(const Swatch &) = delete;
   Swatch & operator=(const Swatch &) = delete;
 
