@@ -47,6 +47,7 @@
 #include "rviz_rendering/logging.hpp"
 #include "rviz_rendering/resource_config.hpp"
 
+#include "software_renderer.hpp"
 #include "string_helper.hpp"
 
 namespace rviz_rendering
@@ -368,7 +369,13 @@ RenderSystem::setupResources()
   if (getGlslVersion() >= 120) {
     Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
       rviz_path + "/ogre_media/materials/scripts120", "FileSystem", "rviz_rendering");
-    if (getGlslVersion() >= 130) {
+    const std::string renderer_name =
+      ogre_root_->getRenderSystem()->getCapabilities()->getDeviceName();
+    if (getGlslVersion() >= 130 && isSoftwareRenderer(renderer_name)) {
+      RVIZ_RENDERING_LOG_INFO_STREAM(
+        "Software renderer '" << renderer_name <<
+          "': point clouds and images are converted on the CPU instead of in shaders.");
+    } else if (getGlslVersion() >= 130) {
       Ogre::ResourceGroupManager::getSingleton().addResourceLocation(
         rviz_path + "/ogre_media/materials/glsl130", "FileSystem", "rviz_rendering");
       Ogre::ResourceGroupManager::getSingleton().addResourceLocation(

@@ -80,6 +80,7 @@ add_library(rviz_rendering SHARED
   src/rviz_rendering/render_system.cpp
   src/rviz_rendering/render_window.cpp
   src/rviz_rendering/resource_config.cpp
+  src/rviz_rendering/software_renderer.cpp
   src/rviz_rendering/mesh_loader_helpers/assimp_loader.cpp
   src/rviz_rendering/string_helper.cpp
   src/rviz_rendering/objects/arrow.cpp
@@ -185,6 +186,8 @@ if(BUILD_TESTING)
   if(TARGET string_helper_test)
     target_link_libraries(string_helper_test rviz_rendering)
   endif()
+
+  ament_add_gmock(software_renderer_test test/rviz_rendering/software_renderer_test.cpp)
 
   ament_add_gmock(point_cloud_test_target
     test/rviz_rendering/objects/point_cloud_test.cpp
